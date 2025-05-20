@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { storageService, Class } from "@/services/LocalStorageService";
+import { supabaseService, Class } from "@/services/SupabaseService";
 
 interface ClassFormProps {
   onClassSelect: (classId: string) => void;
@@ -15,24 +15,33 @@ export function ClassForm({ onClassSelect }: ClassFormProps) {
   const [className, setClassName] = useState("");
   const [classes, setClasses] = useState<Class[]>([]);
   const [selectedClass, setSelectedClass] = useState<string>("");
+  const [loading, setLoading] = useState(false);
 
   // Load classes on component mount
   useEffect(() => {
     loadClasses();
   }, []);
 
-  const loadClasses = () => {
-    const loadedClasses = storageService.getClasses();
-    setClasses(loadedClasses);
-    
-    // Set first class as selected if any exist
-    if (loadedClasses.length > 0 && !selectedClass) {
-      setSelectedClass(loadedClasses[0].id);
-      onClassSelect(loadedClasses[0].id);
+  const loadClasses = async () => {
+    try {
+      setLoading(true);
+      const loadedClasses = await supabaseService.getClasses();
+      setClasses(loadedClasses);
+      
+      // Set first class as selected if any exist
+      if (loadedClasses.length > 0 && !selectedClass) {
+        setSelectedClass(loadedClasses[0].id);
+        onClassSelect(loadedClasses[0].id);
+      }
+    } catch (error) {
+      console.error("Error loading classes:", error);
+      toast.error("Failed to load classes");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleAddClass = () => {
+  const handleAddClass = async () => {
     if (!className.trim()) {
       toast.error("Please enter a class name");
       return;
@@ -45,16 +54,19 @@ export function ClassForm({ onClassSelect }: ClassFormProps) {
         return;
       }
       
-      const newClass = storageService.addClass({ name: className });
-      setClassName("");
-      loadClasses();
-      
-      // Select the new class
-      setSelectedClass(newClass.id);
-      onClassSelect(newClass.id);
-      
-      toast.success("Class added successfully");
+      const newClass = await supabaseService.addClass({ name: className });
+      if (newClass) {
+        setClassName("");
+        await loadClasses();
+        
+        // Select the new class
+        setSelectedClass(newClass.id);
+        onClassSelect(newClass.id);
+        
+        toast.success("Class added successfully");
+      }
     } catch (error) {
+      console.error("Error adding class:", error);
       toast.error((error as Error).message);
     }
   };
@@ -65,12 +77,18 @@ export function ClassForm({ onClassSelect }: ClassFormProps) {
     onClassSelect(classId);
   };
 
-  const handleDeleteClass = (id: string) => {
+  const handleDeleteClass = async (id: string) => {
     if (confirm("Are you sure you want to delete this class? This will also delete all students and attendance records for this class.")) {
-      storageService.deleteClass(id);
-      loadClasses();
-      setSelectedClass("");
-      toast.success("Class deleted successfully");
+      try {
+        await supabaseService.deleteClass(id);
+        await loadClasses();
+        setSelectedClass("");
+        onClassSelect("");
+        toast.success("Class deleted successfully");
+      } catch (error) {
+        console.error("Error deleting class:", error);
+        toast.error("Failed to delete class");
+      }
     }
   };
 
@@ -93,13 +111,15 @@ export function ClassForm({ onClassSelect }: ClassFormProps) {
             </div>
             <Button 
               onClick={handleAddClass}
-              disabled={classes.length >= 2}
+              disabled={classes.length >= 2 || loading}
             >
               Add Class
             </Button>
           </div>
           
-          {classes.length > 0 && (
+          {loading ? (
+            <div className="text-center py-4">Loading classes...</div>
+          ) : classes.length > 0 ? (
             <div className="mt-4">
               <Label htmlFor="class-select">Select Class or Subject</Label>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center mt-2">
@@ -127,7 +147,7 @@ export function ClassForm({ onClassSelect }: ClassFormProps) {
                 </Button>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </CardContent>
     </Card>

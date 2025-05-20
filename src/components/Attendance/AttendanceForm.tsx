@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { format } from "date-fns";
-import { storageService, Student, Class, AttendanceRecord } from "@/services/LocalStorageService";
+import { supabaseService, Student, Class } from "@/services/SupabaseService";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/utils/dateUtils";
@@ -26,6 +26,12 @@ export function AttendanceForm() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [students, setStudents] = useState<Student[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<Record<string, 'present' | 'absent'>>({});
+  const [loading, setLoading] = useState({
+    classes: false,
+    students: false,
+    attendance: false,
+    saving: false
+  });
   
   // Load classes on component mount
   useEffect(() => {
@@ -46,38 +52,62 @@ export function AttendanceForm() {
     }
   }, [selectedClass, selectedDate]);
   
-  const loadClasses = () => {
-    const loadedClasses = storageService.getClasses();
-    setClasses(loadedClasses);
-    
-    // Auto-select first class if any
-    if (loadedClasses.length > 0) {
-      setSelectedClass(loadedClasses[0].id);
+  const loadClasses = async () => {
+    try {
+      setLoading(prev => ({ ...prev, classes: true }));
+      const loadedClasses = await supabaseService.getClasses();
+      setClasses(loadedClasses);
+      
+      // Auto-select first class if any
+      if (loadedClasses.length > 0) {
+        setSelectedClass(loadedClasses[0].id);
+      }
+    } catch (error) {
+      console.error("Error loading classes:", error);
+      toast.error("Failed to load classes");
+    } finally {
+      setLoading(prev => ({ ...prev, classes: false }));
     }
   };
   
-  const loadStudents = () => {
-    const loadedStudents = storageService.getStudentsByClass(selectedClass);
-    setStudents(loadedStudents);
+  const loadStudents = async () => {
+    try {
+      setLoading(prev => ({ ...prev, students: true }));
+      const loadedStudents = await supabaseService.getStudentsByClass(selectedClass);
+      setStudents(loadedStudents);
+    } catch (error) {
+      console.error("Error loading students:", error);
+      toast.error("Failed to load students");
+    } finally {
+      setLoading(prev => ({ ...prev, students: false }));
+    }
   };
   
-  const loadAttendanceRecords = () => {
-    const dateStr = formatDate(selectedDate);
-    const records = storageService.getAttendanceByDateAndClass(dateStr, selectedClass);
-    
-    const recordMap: Record<string, 'present' | 'absent'> = {};
-    records.forEach(record => {
-      recordMap[record.studentId] = record.status;
-    });
-    
-    // Set default status as absent for all students
-    students.forEach(student => {
-      if (!recordMap[student.id]) {
-        recordMap[student.id] = 'absent';
-      }
-    });
-    
-    setAttendanceRecords(recordMap);
+  const loadAttendanceRecords = async () => {
+    try {
+      setLoading(prev => ({ ...prev, attendance: true }));
+      const dateStr = formatDate(selectedDate);
+      const records = await supabaseService.getAttendanceByDateAndClass(dateStr, selectedClass);
+      
+      const recordMap: Record<string, 'present' | 'absent'> = {};
+      records.forEach(record => {
+        recordMap[record.studentId] = record.status;
+      });
+      
+      // Set default status as absent for all students
+      students.forEach(student => {
+        if (!recordMap[student.id]) {
+          recordMap[student.id] = 'absent';
+        }
+      });
+      
+      setAttendanceRecords(recordMap);
+    } catch (error) {
+      console.error("Error loading attendance records:", error);
+      toast.error("Failed to load attendance records");
+    } finally {
+      setLoading(prev => ({ ...prev, attendance: false }));
+    }
   };
   
   const handleClassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -90,25 +120,37 @@ export function AttendanceForm() {
     }
   };
   
-  const toggleAttendance = (studentId: string) => {
-    const currentStatus = attendanceRecords[studentId] || 'absent';
-    const newStatus = currentStatus === 'absent' ? 'present' : 'absent';
-    
-    setAttendanceRecords(prev => ({
-      ...prev,
-      [studentId]: newStatus
-    }));
-    
-    // Save to storage
-    storageService.markAttendance({
-      date: formatDate(selectedDate),
-      classId: selectedClass,
-      studentId,
-      status: newStatus
-    });
-    
-    // Show toast
-    toast.success(`${newStatus === 'present' ? 'Present' : 'Absent'} marked successfully`);
+  const toggleAttendance = async (studentId: string) => {
+    try {
+      setLoading(prev => ({ ...prev, saving: true }));
+      
+      const currentStatus = attendanceRecords[studentId] || 'absent';
+      const newStatus = currentStatus === 'absent' ? 'present' : 'absent';
+      
+      setAttendanceRecords(prev => ({
+        ...prev,
+        [studentId]: newStatus
+      }));
+      
+      // Save to storage
+      await supabaseService.markAttendance({
+        date: formatDate(selectedDate),
+        classId: selectedClass,
+        studentId,
+        status: newStatus
+      });
+      
+      // Show toast
+      toast.success(`${newStatus === 'present' ? 'Present' : 'Absent'} marked successfully`);
+    } catch (error) {
+      console.error("Error marking attendance:", error);
+      toast.error("Failed to mark attendance");
+      
+      // Revert the optimistic update
+      loadAttendanceRecords();
+    } finally {
+      setLoading(prev => ({ ...prev, saving: false }));
+    }
   };
   
   return (
@@ -128,6 +170,7 @@ export function AttendanceForm() {
               value={selectedClass}
               onChange={handleClassChange}
               className="w-full p-2 border rounded-md"
+              disabled={loading.classes}
             >
               <option value="" disabled>Select a class</option>
               {classes.map((classItem) => (
@@ -151,6 +194,7 @@ export function AttendanceForm() {
                     "w-full justify-start text-left font-normal",
                     !selectedDate && "text-muted-foreground"
                   )}
+                  disabled={loading.attendance}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
                   {selectedDate ? format(selectedDate, "PPP") : <span>Pick a date</span>}
@@ -170,7 +214,11 @@ export function AttendanceForm() {
         </div>
         
         {/* Attendance Table */}
-        {selectedClass && students.length > 0 ? (
+        {loading.students || loading.attendance ? (
+          <div className="text-center py-8">
+            <p>Loading...</p>
+          </div>
+        ) : selectedClass && students.length > 0 ? (
           <div className="overflow-x-auto mt-4">
             <table className="nadi-table">
               <thead>
@@ -203,6 +251,7 @@ export function AttendanceForm() {
                         variant={attendanceRecords[student.id] === 'present' ? 'default' : 'outline'}
                         className={attendanceRecords[student.id] === 'present' ? 'bg-green-600 hover:bg-green-700' : ''}
                         onClick={() => toggleAttendance(student.id)}
+                        disabled={loading.saving}
                       >
                         {attendanceRecords[student.id] === 'present' ? 'Present' : 'Absent'}
                       </Button>

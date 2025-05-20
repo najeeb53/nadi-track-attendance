@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { storageService, Student } from "@/services/LocalStorageService";
+import { supabaseService, Student } from "@/services/SupabaseService";
 
 interface StudentFormProps {
   classId: string;
@@ -26,6 +26,7 @@ export function StudentForm({
   const [division, setDivision] = useState("");
   const [subject, setSubject] = useState("");
   const [photo, setPhoto] = useState<string | undefined>(undefined);
+  const [loading, setLoading] = useState(false);
   
   // Set form data when editing student
   useEffect(() => {
@@ -49,7 +50,7 @@ export function StudentForm({
     setEditingStudent(null);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!trNo || !name || !itsNo) {
@@ -58,9 +59,11 @@ export function StudentForm({
     }
     
     try {
+      setLoading(true);
+      
       if (editingStudent) {
         // Update existing student
-        storageService.updateStudent({
+        await supabaseService.updateStudent({
           id: editingStudent.id,
           trNo,
           name,
@@ -73,7 +76,7 @@ export function StudentForm({
         toast.success("Student updated successfully");
       } else {
         // Add new student
-        storageService.addStudent({
+        await supabaseService.addStudent({
           trNo,
           name,
           itsNo,
@@ -88,7 +91,10 @@ export function StudentForm({
       resetForm();
       onStudentAdded();
     } catch (error) {
+      console.error("Error saving student:", error);
       toast.error((error as Error).message);
+    } finally {
+      setLoading(false);
     }
   };
   
@@ -199,11 +205,11 @@ export function StudentForm({
           )}
           
           <div className="flex justify-end gap-4 mt-6">
-            <Button type="button" variant="outline" onClick={handleCancel}>
+            <Button type="button" variant="outline" onClick={handleCancel} disabled={loading}>
               Cancel
             </Button>
-            <Button type="submit">
-              {editingStudent ? "Update Student" : "Add Student"}
+            <Button type="submit" disabled={loading}>
+              {loading ? "Saving..." : (editingStudent ? "Update Student" : "Add Student")}
             </Button>
           </div>
         </form>

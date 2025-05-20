@@ -17,7 +17,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CalendarIcon } from "lucide-react";
 import { format } from "date-fns";
-import { storageService, Class, Student } from "@/services/LocalStorageService";
+import { supabaseService, Class, Student } from "@/services/SupabaseService";
 import { formatDate, getStartOfWeek, getEndOfWeek, getStartOfMonth, getEndOfMonth, getDatesBetween } from "@/utils/dateUtils";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -32,6 +32,12 @@ export function AttendanceReport() {
   const [students, setStudents] = useState<Student[]>([]);
   const [attendanceData, setAttendanceData] = useState<any[]>([]);
   const [summaryData, setSummaryData] = useState<any[]>([]);
+  const [loading, setLoading] = useState({
+    classes: false,
+    students: false,
+    attendance: false,
+    export: false
+  });
   
   // Load classes on component mount
   useEffect(() => {
@@ -70,82 +76,107 @@ export function AttendanceReport() {
     }
   }, [selectedClass, startDate, endDate, selectedTab]);
   
-  const loadClasses = () => {
-    const loadedClasses = storageService.getClasses();
-    setClasses(loadedClasses);
-    
-    // Auto-select first class if any
-    if (loadedClasses.length > 0) {
-      setSelectedClass(loadedClasses[0].id);
+  const loadClasses = async () => {
+    try {
+      setLoading(prev => ({ ...prev, classes: true }));
+      const loadedClasses = await supabaseService.getClasses();
+      setClasses(loadedClasses);
+      
+      // Auto-select first class if any
+      if (loadedClasses.length > 0) {
+        setSelectedClass(loadedClasses[0].id);
+      }
+    } catch (error) {
+      console.error("Error loading classes:", error);
+      toast.error("Failed to load classes");
+    } finally {
+      setLoading(prev => ({ ...prev, classes: false }));
     }
   };
   
-  const loadStudents = () => {
-    const loadedStudents = storageService.getStudentsByClass(selectedClass);
-    setStudents(loadedStudents);
+  const loadStudents = async () => {
+    try {
+      setLoading(prev => ({ ...prev, students: true }));
+      const loadedStudents = await supabaseService.getStudentsByClass(selectedClass);
+      setStudents(loadedStudents);
+    } catch (error) {
+      console.error("Error loading students:", error);
+      toast.error("Failed to load students");
+    } finally {
+      setLoading(prev => ({ ...prev, students: false }));
+    }
   };
   
-  const loadAttendanceData = () => {
-    if (selectedTab === "daily") {
-      // For daily view
-      const dateStr = formatDate(startDate);
-      const records = storageService.getAttendanceByDateAndClass(dateStr, selectedClass);
+  const loadAttendanceData = async () => {
+    try {
+      setLoading(prev => ({ ...prev, attendance: true }));
       
-      const studentAttendance = students.map(student => {
-        const record = records.find(r => r.studentId === student.id);
-        return {
-          ...student,
-          status: record ? record.status : 'absent'
-        };
-      });
-      
-      setAttendanceData(studentAttendance);
-      
-      // Summary data for pie chart
-      const present = records.filter(r => r.status === 'present').length;
-      const absent = students.length - present;
-      
-      setSummaryData([
-        { name: 'Present', value: present },
-        { name: 'Absent', value: absent }
-      ]);
-      
-    } else {
-      // For weekly/monthly view
-      const start = formatDate(startDate);
-      const end = endDate ? formatDate(endDate) : start;
-      
-      // Get statistics for the date range
-      const stats = storageService.getAttendanceStats(selectedClass, start, end);
-      const dates = getDatesBetween(start, end);
-      
-      // Calculate summary for each student
-      const studentSummary = students.map(student => {
-        const presentCount = stats.presentCount[student.id] || 0;
-        const absentCount = stats.absentCount[student.id] || 0;
-        const totalDays = dates.length;
-        const attendanceRate = totalDays > 0 ? (presentCount / totalDays) * 100 : 0;
+      if (selectedTab === "daily") {
+        // For daily view
+        const dateStr = formatDate(startDate);
+        const records = await supabaseService.getAttendanceByDateAndClass(dateStr, selectedClass);
         
-        return {
-          ...student,
-          presentDays: presentCount,
-          absentDays: absentCount,
-          totalDays,
-          attendanceRate: attendanceRate.toFixed(2)
-        };
-      });
-      
-      setAttendanceData(studentSummary);
-      
-      // Summary data for pie chart
-      const totalPresent = Object.values(stats.presentCount).reduce((sum, count) => sum + count, 0);
-      const totalPossible = students.length * dates.length;
-      const totalAbsent = totalPossible - totalPresent;
-      
-      setSummaryData([
-        { name: 'Present', value: totalPresent },
-        { name: 'Absent', value: totalAbsent }
-      ]);
+        const studentAttendance = students.map(student => {
+          const record = records.find(r => r.studentId === student.id);
+          return {
+            ...student,
+            status: record ? record.status : 'absent'
+          };
+        });
+        
+        setAttendanceData(studentAttendance);
+        
+        // Summary data for pie chart
+        const present = records.filter(r => r.status === 'present').length;
+        const absent = students.length - present;
+        
+        setSummaryData([
+          { name: 'Present', value: present },
+          { name: 'Absent', value: absent }
+        ]);
+        
+      } else {
+        // For weekly/monthly view
+        const start = formatDate(startDate);
+        const end = endDate ? formatDate(endDate) : start;
+        
+        // Get statistics for the date range
+        const stats = await supabaseService.getAttendanceStats(selectedClass, start, end);
+        const dates = getDatesBetween(start, end);
+        
+        // Calculate summary for each student
+        const studentSummary = students.map(student => {
+          const presentCount = stats.presentCount[student.id] || 0;
+          const absentCount = stats.absentCount[student.id] || 0;
+          const totalDays = dates.length;
+          const attendanceRate = totalDays > 0 ? (presentCount / totalDays) * 100 : 0;
+          
+          return {
+            ...student,
+            presentDays: presentCount,
+            absentDays: absentCount,
+            totalDays,
+            attendanceRate: attendanceRate.toFixed(2)
+          };
+        });
+        
+        setAttendanceData(studentSummary);
+        
+        // Summary data for pie chart
+        const totalPresent = Object.values(stats.presentCount).reduce((sum, count) => sum + count, 0);
+        const totalPossible = students.length * dates.length;
+        const totalAbsent = totalPossible - totalPresent;
+        
+        setSummaryData([
+          { name: 'Present', value: totalPresent },
+          { name: 'Absent', value: totalAbsent }
+        ]);
+      }
+    } catch (error) {
+      console.error("Error loading attendance data:", error);
+      toast.error("Failed to load attendance data");
+    } finally {
+      setLoading(prev => ({ ...prev, attendance: false }));
     }
   };
   
@@ -170,26 +201,34 @@ export function AttendanceReport() {
     setEndDate(date);
   };
   
-  const exportAttendance = () => {
-    const start = formatDate(startDate);
-    const end = endDate ? formatDate(endDate) : start;
-    
-    const csv = storageService.exportAttendanceToCSV(start, end, selectedClass);
-    
-    // Create a CSV download
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', `attendance_${start}_to_${end}.csv`);
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    toast.success('Attendance data exported successfully');
+  const exportAttendance = async () => {
+    try {
+      setLoading(prev => ({ ...prev, export: true }));
+      const start = formatDate(startDate);
+      const end = endDate ? formatDate(endDate) : start;
+      
+      const csv = await supabaseService.exportAttendanceToCSV(start, end, selectedClass);
+      
+      // Create a CSV download
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', `attendance_${start}_to_${end}.csv`);
+      link.style.visibility = 'hidden';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success('Attendance data exported successfully');
+    } catch (error) {
+      console.error("Error exporting attendance data:", error);
+      toast.error("Failed to export attendance data");
+    } finally {
+      setLoading(prev => ({ ...prev, export: false }));
+    }
   };
   
   // Pie chart colors
@@ -212,6 +251,7 @@ export function AttendanceReport() {
               value={selectedClass}
               onChange={handleClassChange}
               className="w-full p-2 border rounded-md"
+              disabled={loading.classes}
             >
               <option value="" disabled>Select a class</option>
               {classes.map((classItem) => (
@@ -251,6 +291,7 @@ export function AttendanceReport() {
                     "w-full justify-start text-left font-normal",
                     !startDate && "text-muted-foreground"
                   )}
+                  disabled={loading.attendance}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
                   {startDate ? format(startDate, "PPP") : <span>Pick a date</span>}
@@ -282,6 +323,7 @@ export function AttendanceReport() {
                       "w-full justify-start text-left font-normal",
                       !endDate && "text-muted-foreground"
                     )}
+                    disabled={loading.attendance}
                   >
                     <CalendarIcon className="mr-2 h-4 w-4" />
                     {endDate ? format(endDate, "PPP") : <span>Pick a date</span>}
@@ -304,8 +346,11 @@ export function AttendanceReport() {
         
         {/* Export Button */}
         <div className="flex justify-end mb-6">
-          <Button onClick={exportAttendance}>
-            Export to CSV
+          <Button 
+            onClick={exportAttendance} 
+            disabled={loading.export || loading.attendance}
+          >
+            {loading.export ? "Exporting..." : "Export to CSV"}
           </Button>
         </div>
         
@@ -320,39 +365,49 @@ export function AttendanceReport() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="h-64">
-              {summaryData.length > 0 && summaryData.some(item => item.value > 0) ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={summaryData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    >
-                      {summaryData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center">
-                  <p className="text-muted-foreground">No attendance data available</p>
-                </div>
-              )}
-            </div>
+            {loading.attendance ? (
+              <div className="h-64 flex items-center justify-center">
+                <p>Loading data...</p>
+              </div>
+            ) : (
+              <div className="h-64">
+                {summaryData.length > 0 && summaryData.some(item => item.value > 0) ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={summaryData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      >
+                        {summaryData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center">
+                    <p className="text-muted-foreground">No attendance data available</p>
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
         
         {/* Attendance Table */}
-        {selectedClass && students.length > 0 ? (
+        {loading.attendance ? (
+          <div className="text-center py-8">
+            <p>Loading attendance data...</p>
+          </div>
+        ) : selectedClass && students.length > 0 ? (
           <div className="overflow-x-auto mt-4">
             <table className="nadi-table">
               <thead>
