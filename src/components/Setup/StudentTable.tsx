@@ -1,5 +1,4 @@
-
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -23,15 +22,15 @@ export function StudentTable({ classId, onEdit, refreshTrigger }: StudentTablePr
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [searchTerm, setSearchTerm] = useState("");
   
-  // Load students when component mounts or classId/refreshTrigger changes
-  useState(() => {
+  // Load students when component mounts
+  useEffect(() => {
     if (classId) {
       loadStudents();
     }
-  });
+  }, []);
   
   // Update when classId or refreshTrigger changes
-  useState(() => {
+  useEffect(() => {
     if (classId) {
       loadStudents();
     } else {
