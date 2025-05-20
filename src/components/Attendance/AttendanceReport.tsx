@@ -22,6 +22,13 @@ import { formatDate, getStartOfWeek, getEndOfWeek, getStartOfMonth, getEndOfMont
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ResponsiveContainer, PieChart, Pie, Cell, Legend, Tooltip } from 'recharts';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export function AttendanceReport() {
   const [classes, setClasses] = useState<Class[]>([]);
@@ -32,11 +39,14 @@ export function AttendanceReport() {
   const [students, setStudents] = useState<Student[]>([]);
   const [attendanceData, setAttendanceData] = useState<any[]>([]);
   const [summaryData, setSummaryData] = useState<any[]>([]);
+  const [divisions, setDivisions] = useState<string[]>([]);
+  const [selectedDivision, setSelectedDivision] = useState<string>("");
   const [loading, setLoading] = useState({
     classes: false,
     students: false,
     attendance: false,
-    export: false
+    export: false,
+    divisions: false
   });
   
   // Load classes on component mount
@@ -44,12 +54,22 @@ export function AttendanceReport() {
     loadClasses();
   }, []);
   
-  // Load students when class changes
+  // Load divisions when class changes
+  useEffect(() => {
+    if (selectedClass) {
+      loadDivisions();
+    } else {
+      setDivisions([]);
+      setSelectedDivision("");
+    }
+  }, [selectedClass]);
+  
+  // Load students when class and division change
   useEffect(() => {
     if (selectedClass) {
       loadStudents();
     }
-  }, [selectedClass]);
+  }, [selectedClass, selectedDivision]);
   
   // Set date ranges when tab changes
   useEffect(() => {
@@ -74,7 +94,7 @@ export function AttendanceReport() {
     if (selectedClass && startDate) {
       loadAttendanceData();
     }
-  }, [selectedClass, startDate, endDate, selectedTab]);
+  }, [selectedClass, startDate, endDate, selectedTab, selectedDivision]);
   
   const loadClasses = async () => {
     try {
@@ -94,10 +114,35 @@ export function AttendanceReport() {
     }
   };
   
+  const loadDivisions = async () => {
+    try {
+      setLoading(prev => ({ ...prev, divisions: true }));
+      const divisions = await supabaseService.getDivisionsByClass(selectedClass);
+      setDivisions(divisions);
+      
+      // Auto-select "All Divisions" as default
+      setSelectedDivision("");
+    } catch (error) {
+      console.error("Error loading divisions:", error);
+      toast.error("Failed to load divisions");
+    } finally {
+      setLoading(prev => ({ ...prev, divisions: false }));
+    }
+  };
+  
   const loadStudents = async () => {
     try {
       setLoading(prev => ({ ...prev, students: true }));
-      const loadedStudents = await supabaseService.getStudentsByClass(selectedClass);
+      let loadedStudents;
+      
+      if (selectedDivision) {
+        // Load students for specific division
+        loadedStudents = await supabaseService.getStudentsByClassAndDivision(selectedClass, selectedDivision);
+      } else {
+        // Load all students for the class
+        loadedStudents = await supabaseService.getStudentsByClass(selectedClass);
+      }
+      
       setStudents(loadedStudents);
     } catch (error) {
       console.error("Error loading students:", error);
@@ -114,7 +159,15 @@ export function AttendanceReport() {
       if (selectedTab === "daily") {
         // For daily view
         const dateStr = formatDate(startDate);
-        const records = await supabaseService.getAttendanceByDateAndClass(dateStr, selectedClass);
+        let records;
+        
+        if (selectedDivision) {
+          // Get attendance records for specific division
+          records = await supabaseService.getAttendanceByDateClassAndDivision(dateStr, selectedClass, selectedDivision);
+        } else {
+          // Get all attendance records for class
+          records = await supabaseService.getAttendanceByDateAndClass(dateStr, selectedClass);
+        }
         
         const studentAttendance = students.map(student => {
           const record = records.find(r => r.studentId === student.id);
@@ -140,8 +193,14 @@ export function AttendanceReport() {
         const start = formatDate(startDate);
         const end = endDate ? formatDate(endDate) : start;
         
-        // Get statistics for the date range
-        const stats = await supabaseService.getAttendanceStats(selectedClass, start, end);
+        // Get statistics for the date range and division if selected
+        let stats;
+        if (selectedDivision) {
+          stats = await supabaseService.getAttendanceStatsWithDivision(selectedClass, start, end, selectedDivision);
+        } else {
+          stats = await supabaseService.getAttendanceStats(selectedClass, start, end);
+        }
+        
         const dates = getDatesBetween(start, end);
         
         // Calculate summary for each student
@@ -182,6 +241,11 @@ export function AttendanceReport() {
   
   const handleClassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedClass(e.target.value);
+    setSelectedDivision(""); // Reset division when class changes
+  };
+  
+  const handleDivisionChange = (value: string) => {
+    setSelectedDivision(value);
   };
   
   const handleTabChange = (value: string) => {
@@ -207,7 +271,8 @@ export function AttendanceReport() {
       const start = formatDate(startDate);
       const end = endDate ? formatDate(endDate) : start;
       
-      const csv = await supabaseService.exportAttendanceToCSV(start, end, selectedClass);
+      // Pass division parameter if selected
+      const csv = await supabaseService.exportAttendanceToCSV(start, end, selectedClass, selectedDivision);
       
       // Create a CSV download
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -215,7 +280,7 @@ export function AttendanceReport() {
       const url = URL.createObjectURL(blob);
       
       link.setAttribute('href', url);
-      link.setAttribute('download', `attendance_${start}_to_${end}.csv`);
+      link.setAttribute('download', `attendance_${start}_to_${end}${selectedDivision ? `_${selectedDivision}` : ''}.csv`);
       link.style.visibility = 'hidden';
       
       document.body.appendChild(link);
@@ -277,6 +342,28 @@ export function AttendanceReport() {
           </div>
         </div>
         
+        {/* Division Selection */}
+        {selectedClass && divisions.length > 0 && (
+          <div className="mb-6">
+            <label className="block text-sm font-medium mb-2">
+              Select Division
+            </label>
+            <Select value={selectedDivision} onValueChange={handleDivisionChange}>
+              <SelectTrigger className="w-full" disabled={loading.divisions}>
+                <SelectValue placeholder="All Divisions" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All Divisions</SelectItem>
+                {divisions.map((division) => (
+                  <SelectItem key={division} value={division}>
+                    {division}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           {/* Date Selection */}
           <div>
@@ -298,7 +385,7 @@ export function AttendanceReport() {
                     {startDate ? format(startDate, "PPP") : <span>Pick a date</span>}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
+                <PopoverContent className="w-auto p-0 pointer-events-auto" align="start">
                   <Calendar
                     mode="single"
                     selected={startDate}
@@ -332,7 +419,7 @@ export function AttendanceReport() {
                       {endDate ? format(endDate, "PPP") : <span>Pick a date</span>}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
+                  <PopoverContent className="w-auto p-0 pointer-events-auto" align="start">
                     <Calendar
                       mode="single"
                       selected={endDate}
@@ -366,6 +453,7 @@ export function AttendanceReport() {
               {selectedTab === "daily" 
                 ? format(startDate, "PPP")
                 : `${format(startDate, "PPP")} to ${endDate ? format(endDate, "PPP") : format(startDate, "PPP")}`}
+              {selectedDivision && ` - Division: ${selectedDivision}`}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -419,6 +507,7 @@ export function AttendanceReport() {
                   <th>Tr. No.</th>
                   <th>Name</th>
                   <th>ITS No.</th>
+                  <th>Division</th>
                   {selectedTab === "daily" ? (
                     <th>Status</th>
                   ) : (
@@ -447,6 +536,7 @@ export function AttendanceReport() {
                       </div>
                     </td>
                     <td>{student.itsNo}</td>
+                    <td>{student.division || "-"}</td>
                     {selectedTab === "daily" ? (
                       <td>
                         <span 
@@ -474,7 +564,7 @@ export function AttendanceReport() {
             {!selectedClass ? (
               <p>Please select a class to view reports</p>
             ) : (
-              <p>No students found in this class</p>
+              <p>No students found {selectedDivision ? `in division ${selectedDivision}` : 'in this class'}</p>
             )}
           </div>
         )}

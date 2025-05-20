@@ -19,6 +19,13 @@ import { supabaseService, Student, Class } from "@/services/SupabaseService";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/utils/dateUtils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export function AttendanceForm() {
   const [classes, setClasses] = useState<Class[]>([]);
@@ -26,11 +33,14 @@ export function AttendanceForm() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [students, setStudents] = useState<Student[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<Record<string, 'present' | 'absent'>>({});
+  const [divisions, setDivisions] = useState<string[]>([]);
+  const [selectedDivision, setSelectedDivision] = useState<string>("");
   const [loading, setLoading] = useState({
     classes: false,
     students: false,
     attendance: false,
-    saving: false
+    saving: false,
+    divisions: false
   });
   
   // Load classes on component mount
@@ -38,19 +48,29 @@ export function AttendanceForm() {
     loadClasses();
   }, []);
   
-  // Load students when class changes
+  // Load divisions when class changes
+  useEffect(() => {
+    if (selectedClass) {
+      loadDivisions();
+    } else {
+      setDivisions([]);
+      setSelectedDivision("");
+    }
+  }, [selectedClass]);
+  
+  // Load students when class and division changes
   useEffect(() => {
     if (selectedClass) {
       loadStudents();
     }
-  }, [selectedClass]);
+  }, [selectedClass, selectedDivision]);
   
-  // Load attendance records when class or date changes
+  // Load attendance records when class, division or date changes
   useEffect(() => {
     if (selectedClass && selectedDate) {
       loadAttendanceRecords();
     }
-  }, [selectedClass, selectedDate]);
+  }, [selectedClass, selectedDivision, selectedDate]);
   
   const loadClasses = async () => {
     try {
@@ -70,10 +90,35 @@ export function AttendanceForm() {
     }
   };
   
+  const loadDivisions = async () => {
+    try {
+      setLoading(prev => ({ ...prev, divisions: true }));
+      const divisions = await supabaseService.getDivisionsByClass(selectedClass);
+      setDivisions(divisions);
+      
+      // Auto-select "All Divisions" as default
+      setSelectedDivision("");
+    } catch (error) {
+      console.error("Error loading divisions:", error);
+      toast.error("Failed to load divisions");
+    } finally {
+      setLoading(prev => ({ ...prev, divisions: false }));
+    }
+  };
+  
   const loadStudents = async () => {
     try {
       setLoading(prev => ({ ...prev, students: true }));
-      const loadedStudents = await supabaseService.getStudentsByClass(selectedClass);
+      let loadedStudents;
+      
+      if (selectedDivision) {
+        // Load students for specific division
+        loadedStudents = await supabaseService.getStudentsByClassAndDivision(selectedClass, selectedDivision);
+      } else {
+        // Load all students for the class
+        loadedStudents = await supabaseService.getStudentsByClass(selectedClass);
+      }
+      
       setStudents(loadedStudents);
     } catch (error) {
       console.error("Error loading students:", error);
@@ -112,6 +157,11 @@ export function AttendanceForm() {
   
   const handleClassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedClass(e.target.value);
+    setSelectedDivision(""); // Reset division when class changes
+  };
+  
+  const handleDivisionChange = (value: string) => {
+    setSelectedDivision(value);
   };
   
   const handleDateChange = (date: Date | undefined) => {
@@ -132,7 +182,7 @@ export function AttendanceForm() {
         [studentId]: newStatus
       }));
       
-      // Save to storage
+      // Save to database
       await supabaseService.markAttendance({
         date: formatDate(selectedDate),
         classId: selectedClass,
@@ -201,7 +251,7 @@ export function AttendanceForm() {
                     {selectedDate ? format(selectedDate, "PPP") : <span>Pick a date</span>}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
+                <PopoverContent className="w-auto p-0 pointer-events-auto" align="start">
                   <Calendar
                     mode="single"
                     selected={selectedDate}
@@ -214,6 +264,28 @@ export function AttendanceForm() {
             </div>
           </div>
         </div>
+        
+        {/* Division Selection */}
+        {selectedClass && divisions.length > 0 && (
+          <div className="mb-6">
+            <label className="block text-sm font-medium mb-2">
+              Select Division
+            </label>
+            <Select value={selectedDivision} onValueChange={handleDivisionChange}>
+              <SelectTrigger className="w-full" disabled={loading.divisions}>
+                <SelectValue placeholder="All Divisions" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All Divisions</SelectItem>
+                {divisions.map((division) => (
+                  <SelectItem key={division} value={division}>
+                    {division}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         
         {/* Attendance Table */}
         {loading.students || loading.attendance ? (
@@ -228,6 +300,7 @@ export function AttendanceForm() {
                   <th>Tr. No.</th>
                   <th>Name</th>
                   <th>ITS No.</th>
+                  <th>Division</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -248,6 +321,7 @@ export function AttendanceForm() {
                       </div>
                     </td>
                     <td>{student.itsNo}</td>
+                    <td>{student.division || "-"}</td>
                     <td>
                       <Button
                         variant={attendanceRecords[student.id] === 'present' ? 'default' : 'outline'}
@@ -268,7 +342,7 @@ export function AttendanceForm() {
             {!selectedClass ? (
               <p>Please select a class to mark attendance</p>
             ) : (
-              <p>No students found in this class</p>
+              <p>No students found {selectedDivision ? `in division ${selectedDivision}` : 'in this class'}</p>
             )}
           </div>
         )}

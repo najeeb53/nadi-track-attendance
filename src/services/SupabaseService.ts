@@ -85,6 +85,24 @@ class SupabaseService {
       throw new Error(error.message);
     }
   }
+  
+  // Division operations
+  async getDivisionsByClass(classId: string): Promise<string[]> {
+    const { data, error } = await supabase
+      .from('students')
+      .select('division')
+      .eq('class_id', classId)
+      .not('division', 'is', null);
+    
+    if (error) {
+      console.error('Error fetching divisions:', error);
+      return [];
+    }
+    
+    // Extract unique division values
+    const divisions = [...new Set(data.map(item => item.division).filter(Boolean))];
+    return divisions;
+  }
 
   // Student operations
   async getStudents(): Promise<Student[]> {
@@ -117,6 +135,30 @@ class SupabaseService {
     
     if (error) {
       console.error('Error fetching students by class:', error);
+      return [];
+    }
+    
+    return data.map(item => ({
+      id: item.id,
+      trNo: item.tr_no,
+      name: item.name,
+      itsNo: item.its_no,
+      classId: item.class_id,
+      division: item.division,
+      subject: item.subject,
+      photo: item.photo
+    }));
+  }
+  
+  async getStudentsByClassAndDivision(classId: string, division: string): Promise<Student[]> {
+    const { data, error } = await supabase
+      .from('students')
+      .select('*')
+      .eq('class_id', classId)
+      .eq('division', division);
+    
+    if (error) {
+      console.error('Error fetching students by class and division:', error);
       return [];
     }
     
@@ -280,6 +322,33 @@ class SupabaseService {
       status: item.status as 'present' | 'absent'
     }));
   }
+  
+  async getAttendanceByDateClassAndDivision(date: string, classId: string, division: string): Promise<AttendanceRecord[]> {
+    // Join attendance with students to filter by division
+    const { data, error } = await supabase
+      .from('attendance')
+      .select(`
+        *,
+        students:student_id (id, division)
+      `)
+      .eq('date', date)
+      .eq('class_id', classId);
+    
+    if (error) {
+      console.error('Error fetching attendance by date, class and division:', error);
+      return [];
+    }
+    
+    // Filter records by division
+    const filteredRecords = data.filter(record => record.students?.division === division);
+    
+    return filteredRecords.map(item => ({
+      date: item.date,
+      classId: item.class_id,
+      studentId: item.student_id,
+      status: item.status as 'present' | 'absent'
+    }));
+  }
 
   async markAttendance(record: AttendanceRecord): Promise<void> {
     // Check if record already exists
@@ -367,15 +436,90 @@ class SupabaseService {
     };
   }
   
+  async getAttendanceStatsWithDivision(
+    classId: string, 
+    startDate: string, 
+    endDate: string, 
+    division: string
+  ): Promise<{ 
+    totalDays: number;
+    presentCount: Record<string, number>;
+    absentCount: Record<string, number>;
+  }> {
+    // Get student IDs for the specific division
+    const { data: divisionStudents } = await supabase
+      .from('students')
+      .select('id')
+      .eq('class_id', classId)
+      .eq('division', division);
+    
+    if (!divisionStudents || divisionStudents.length === 0) {
+      return {
+        totalDays: 0,
+        presentCount: {},
+        absentCount: {}
+      };
+    }
+    
+    // Get student IDs as an array
+    const studentIds = divisionStudents.map(s => s.id);
+    
+    // Get attendance records for these students
+    const { data, error } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('class_id', classId)
+      .in('student_id', studentIds)
+      .gte('date', startDate)
+      .lte('date', endDate);
+    
+    if (error) {
+      console.error('Error fetching attendance stats for division:', error);
+      return {
+        totalDays: 0,
+        presentCount: {},
+        absentCount: {}
+      };
+    }
+    
+    // Get unique dates for total days count
+    const uniqueDates = [...new Set(data.map(r => r.date))];
+    
+    // Count present/absent by student
+    const presentCount: Record<string, number> = {};
+    const absentCount: Record<string, number> = {};
+    
+    data.forEach(record => {
+      const { student_id, status } = record;
+      
+      if (status === 'present') {
+        presentCount[student_id] = (presentCount[student_id] || 0) + 1;
+      } else {
+        absentCount[student_id] = (absentCount[student_id] || 0) + 1;
+      }
+    });
+    
+    return {
+      totalDays: uniqueDates.length,
+      presentCount,
+      absentCount
+    };
+  }
+  
   // Export attendance data to CSV
-  async exportAttendanceToCSV(startDate: string, endDate: string, classId?: string): Promise<string> {
+  async exportAttendanceToCSV(
+    startDate: string, 
+    endDate: string, 
+    classId?: string, 
+    division?: string
+  ): Promise<string> {
     // Query to fetch attendance records
     let query = supabase
       .from('attendance')
       .select(`
         date,
         classes:class_id(name),
-        students:student_id(name, tr_no, its_no),
+        students:student_id(name, tr_no, its_no, division, subject),
         status
       `)
       .gte('date', startDate)
@@ -393,16 +537,24 @@ class SupabaseService {
       return '';
     }
     
+    // Filter by division if specified
+    let filteredData = data;
+    if (division) {
+      filteredData = data.filter(record => record.students?.division === division);
+    }
+    
     // Prepare CSV header
-    const headers = ['Date', 'Class', 'Student Name', 'Tr. No.', 'ITS No.', 'Status'];
+    const headers = ['Date', 'Class', 'Division', 'Subject', 'Student Name', 'Tr. No.', 'ITS No.', 'Status'];
     let csv = headers.join(',') + '\n';
     
     // Add records to CSV
-    data.forEach((record: any) => {
+    filteredData.forEach((record: any) => {
       if (record.classes && record.students) {
         const row = [
           record.date,
           record.classes.name,
+          record.students.division || '-',
+          record.students.subject || '-',
           record.students.name,
           record.students.tr_no,
           record.students.its_no,
