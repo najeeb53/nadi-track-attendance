@@ -48,11 +48,7 @@ export function ClassForm({ onClassSelect }: ClassFormProps) {
     }
     
     try {
-      // Check if we already have maximum classes (2)
-      if (classes.length >= 2) {
-        toast.error("Maximum of 2 classes allowed");
-        return;
-      }
+      // Removed the classes.length >= 2 check to allow unlimited classes
       
       const newClass = await supabaseService.addClass({ name: className });
       if (newClass) {
@@ -111,7 +107,7 @@ export function ClassForm({ onClassSelect }: ClassFormProps) {
             </div>
             <Button 
               onClick={handleAddClass}
-              disabled={classes.length >= 2 || loading}
+              disabled={loading}
             >
               Add Class
             </Button>
