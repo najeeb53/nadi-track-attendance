@@ -570,7 +570,7 @@ class SupabaseService {
   // Add this method to get all dates for which attendance was recorded for a class
   async getAttendanceDatesByClass(classId: string): Promise<string[]> {
     try {
-      const { data, error } = await this.supabase
+      const { data, error } = await supabase
         .from('attendance')
         .select('date')
         .eq('class_id', classId)
