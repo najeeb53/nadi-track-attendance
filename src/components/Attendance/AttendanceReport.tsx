@@ -219,9 +219,10 @@ export function AttendanceReport() {
         
         setAttendanceData(studentSummary);
         
-        // Summary data for pie chart - FIX HERE: Ensure values are numbers
+        // Summary data for pie chart - Ensure values are converted to numbers
         const totalPresent = Object.values(stats.presentCount).reduce((sum: number, count: any) => sum + Number(count), 0);
-        const totalPossible = students.length * dates.length;
+        // Convert to number to ensure it's a valid arithmetic operand
+        const totalPossible = Number(students.length) * Number(dates.length);
         const totalAbsent = totalPossible - totalPresent;
         
         setSummaryData([
