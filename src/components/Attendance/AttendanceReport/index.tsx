@@ -7,280 +7,244 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { supabaseService, Class, Student } from "@/services/SupabaseService";
-import { formatDate, getStartOfWeek, getEndOfWeek, getStartOfMonth, getEndOfMonth, getDatesBetween } from "@/utils/dateUtils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { supabaseService, Student } from "@/services/SupabaseService";
+import { formatDate, getFormattedDate } from "@/utils/dateUtils";
 import { toast } from "sonner";
-import { ClassSelector } from './ClassSelector';
-import { DivisionSelector } from './DivisionSelector';
-import { ReportTypeTabs } from './ReportTypeTabs';
-import { DateSelector } from './DateSelector';
-import { AttendanceSummaryChart } from './AttendanceSummaryChart';
 import { AttendanceTable } from './AttendanceTable';
+import { ArrowDown, ArrowUp, Download, FileText } from "lucide-react";
+
+type SortDirection = 'asc' | 'desc';
+type SortField = 'trNo' | 'name' | 'division' | 'subject';
+type ViewMode = 'present' | 'absent';
 
 export function AttendanceReport() {
-  const [classes, setClasses] = useState<Class[]>([]);
-  const [selectedClass, setSelectedClass] = useState<string>("");
-  const [selectedTab, setSelectedTab] = useState<string>("daily");
-  const [startDate, setStartDate] = useState<Date>(new Date());
-  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+  const [defaultClass, setDefaultClass] = useState<string>("");
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>("");
+  const [viewMode, setViewMode] = useState<ViewMode>('present');
   const [students, setStudents] = useState<Student[]>([]);
-  const [attendanceData, setAttendanceData] = useState<any[]>([]);
-  const [summaryData, setSummaryData] = useState<any[]>([]);
-  const [divisions, setDivisions] = useState<string[]>([]);
-  const [selectedDivision, setSelectedDivision] = useState<string>("all");
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [loading, setLoading] = useState({
-    classes: false,
+    dates: false,
     students: false,
-    attendance: false,
     export: false,
-    divisions: false
+    exportAll: false
   });
   
-  // Load classes on component mount
+  // Load default class on component mount
   useEffect(() => {
-    loadClasses();
+    loadDefaultClass();
   }, []);
   
-  // Load divisions when class changes
+  // Load available dates when default class is set
   useEffect(() => {
-    if (selectedClass) {
-      loadDivisions();
-    } else {
-      setDivisions([]);
-      setSelectedDivision("all");
+    if (defaultClass) {
+      loadAvailableDates();
     }
-  }, [selectedClass]);
+  }, [defaultClass]);
   
-  // Load students when class and division change
+  // Load student data when date and view mode change
   useEffect(() => {
-    if (selectedClass) {
-      loadStudents();
+    if (defaultClass && selectedDate) {
+      loadStudentData();
     }
-  }, [selectedClass, selectedDivision]);
+  }, [defaultClass, selectedDate, viewMode]);
   
-  // Set date ranges when tab changes
-  useEffect(() => {
-    switch (selectedTab) {
-      case "daily":
-        setStartDate(new Date());
-        setEndDate(undefined);
-        break;
-      case "weekly":
-        setStartDate(new Date(getStartOfWeek()));
-        setEndDate(new Date(getEndOfWeek()));
-        break;
-      case "monthly":
-        setStartDate(new Date(getStartOfMonth()));
-        setEndDate(new Date(getEndOfMonth()));
-        break;
-    }
-  }, [selectedTab]);
-  
-  // Load attendance data when parameters change
-  useEffect(() => {
-    if (selectedClass && startDate) {
-      loadAttendanceData();
-    }
-  }, [selectedClass, startDate, endDate, selectedTab, selectedDivision]);
-  
-  const loadClasses = async () => {
+  const loadDefaultClass = async () => {
     try {
-      setLoading(prev => ({ ...prev, classes: true }));
       const loadedClasses = await supabaseService.getClasses();
-      setClasses(loadedClasses);
       
       // Auto-select first class if any
       if (loadedClasses.length > 0) {
-        setSelectedClass(loadedClasses[0].id);
+        setDefaultClass(loadedClasses[0].id);
       }
     } catch (error) {
-      console.error("Error loading classes:", error);
+      console.error("Error loading default class:", error);
       toast.error("Failed to load classes");
-    } finally {
-      setLoading(prev => ({ ...prev, classes: false }));
     }
   };
   
-  const loadDivisions = async () => {
+  const loadAvailableDates = async () => {
     try {
-      setLoading(prev => ({ ...prev, divisions: true }));
-      const divisions = await supabaseService.getDivisionsByClass(selectedClass);
-      setDivisions(divisions);
+      setLoading(prev => ({ ...prev, dates: true }));
       
-      // Auto-select "All Divisions" as default
-      setSelectedDivision("all");
+      // Get all unique dates for which attendance was recorded for this class
+      const dates = await supabaseService.getAttendanceDatesByClass(defaultClass);
+      setAvailableDates(dates);
+      
+      // Select the most recent date by default if available
+      if (dates.length > 0) {
+        setSelectedDate(dates[0]);
+      } else {
+        setSelectedDate("");
+      }
     } catch (error) {
-      console.error("Error loading divisions:", error);
-      toast.error("Failed to load divisions");
+      console.error("Error loading available dates:", error);
+      toast.error("Failed to load attendance dates");
     } finally {
-      setLoading(prev => ({ ...prev, divisions: false }));
+      setLoading(prev => ({ ...prev, dates: false }));
     }
   };
   
-  const loadStudents = async () => {
+  const loadStudentData = async () => {
     try {
       setLoading(prev => ({ ...prev, students: true }));
-      let loadedStudents;
       
-      if (selectedDivision && selectedDivision !== "all") {
-        // Load students for specific division
-        loadedStudents = await supabaseService.getStudentsByClassAndDivision(selectedClass, selectedDivision);
+      // Get all students for this class
+      const allStudents = await supabaseService.getStudentsByClass(defaultClass);
+      
+      // Get attendance records for the selected date
+      const records = await supabaseService.getAttendanceByDateAndClass(selectedDate, defaultClass);
+      
+      let filteredStudents: Student[] = [];
+      
+      if (viewMode === 'present') {
+        // Filter for present students
+        filteredStudents = allStudents.filter(student => 
+          records.some(record => record.studentId === student.id && record.status === 'present')
+        );
       } else {
-        // Load all students for the class
-        loadedStudents = await supabaseService.getStudentsByClass(selectedClass);
+        // Filter for absent students
+        filteredStudents = allStudents.filter(student => 
+          records.every(record => record.studentId !== student.id || record.status !== 'present')
+        );
       }
       
-      setStudents(loadedStudents);
+      setStudents(filteredStudents);
     } catch (error) {
-      console.error("Error loading students:", error);
-      toast.error("Failed to load students");
+      console.error("Error loading student data:", error);
+      toast.error("Failed to load student data");
     } finally {
       setLoading(prev => ({ ...prev, students: false }));
     }
   };
   
-  const loadAttendanceData = async () => {
-    try {
-      setLoading(prev => ({ ...prev, attendance: true }));
+  const handleDateChange = (value: string) => {
+    setSelectedDate(value);
+  };
+  
+  const handleViewModeChange = (value: ViewMode) => {
+    setViewMode(value);
+  };
+  
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+  
+  const getSortedStudents = (): Student[] => {
+    return [...students].sort((a, b) => {
+      const aValue = a[sortField as keyof Student];
+      const bValue = b[sortField as keyof Student];
       
-      if (selectedTab === "daily") {
-        // For daily view
-        const dateStr = formatDate(startDate);
-        let records;
-        
-        if (selectedDivision && selectedDivision !== "all") {
-          // Get attendance records for specific division
-          records = await supabaseService.getAttendanceByDateClassAndDivision(dateStr, selectedClass, selectedDivision);
-        } else {
-          // Get all attendance records for class
-          records = await supabaseService.getAttendanceByDateAndClass(dateStr, selectedClass);
-        }
-        
-        // Find students who were marked present
-        const presentStudents = students.filter(student => 
-          records.some(r => r.studentId === student.id && r.status === 'present')
-        );
-        
-        setAttendanceData(presentStudents);
-        
-        // Summary data for pie chart
-        const present = records.filter(r => r.status === 'present').length;
-        const absent = students.length - present;
-        
-        setSummaryData([
-          { name: 'Present', value: present },
-          { name: 'Absent', value: absent }
-        ]);
-        
-      } else {
-        // For weekly/monthly view
-        const start = formatDate(startDate);
-        const end = endDate ? formatDate(endDate) : start;
-        
-        // Get statistics for the date range and division if selected
-        let stats;
-        if (selectedDivision && selectedDivision !== "all") {
-          stats = await supabaseService.getAttendanceStatsWithDivision(selectedClass, start, end, selectedDivision);
-        } else {
-          stats = await supabaseService.getAttendanceStats(selectedClass, start, end);
-        }
-        
-        const dates = getDatesBetween(start, end);
-        
-        // Find students who were marked present at least once in the date range
-        const presentStudents = students.filter(student => 
-          (stats.presentCount[student.id] || 0) > 0
-        );
-        
-        // Calculate summary for each student
-        const studentSummary = presentStudents.map(student => {
-          const presentCount = stats.presentCount[student.id] || 0;
-          const totalDays = dates.length;
-          
-          return {
-            ...student,
-            presentDays: presentCount,
-            totalDays
-          };
-        });
-        
-        setAttendanceData(studentSummary);
-        
-        // Summary data for pie chart - Ensure values are converted to numbers
-        const totalPresent = Object.values(stats.presentCount).reduce((sum: number, count: any) => sum + Number(count), 0);
-        // Convert to number to ensure it's a valid arithmetic operand
-        const totalPossible = Number(students.length) * Number(dates.length);
-        const totalAbsent = Number(totalPossible) - Number(totalPresent);
-        
-        setSummaryData([
-          { name: 'Present', value: totalPresent },
-          { name: 'Absent', value: totalAbsent }
-        ]);
-      }
-    } catch (error) {
-      console.error("Error loading attendance data:", error);
-      toast.error("Failed to load attendance data");
-    } finally {
-      setLoading(prev => ({ ...prev, attendance: false }));
-    }
+      const comparison = typeof aValue === 'string' && typeof bValue === 'string'
+        ? aValue.localeCompare(bValue)
+        : String(aValue || '').localeCompare(String(bValue || ''));
+      
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
   };
   
-  const handleClassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedClass(e.target.value);
-    setSelectedDivision("all"); // Reset division when class changes
-  };
-  
-  const handleDivisionChange = (value: string) => {
-    setSelectedDivision(value);
-  };
-  
-  const handleTabChange = (value: string) => {
-    setSelectedTab(value);
-  };
-  
-  const handleDateChange = (date: Date | undefined) => {
-    if (date) {
-      setStartDate(date);
-      if (selectedTab !== "daily") {
-        setEndDate(undefined);
-      }
-    }
-  };
-  
-  const handleEndDateChange = (date: Date | undefined) => {
-    setEndDate(date);
-  };
-  
-  const exportAttendance = async () => {
+  const handleExport = async () => {
     try {
       setLoading(prev => ({ ...prev, export: true }));
-      const start = formatDate(startDate);
-      const end = endDate ? formatDate(endDate) : start;
       
-      // Pass division parameter if selected and not "all"
-      const division = selectedDivision !== "all" ? selectedDivision : "";
-      const csv = await supabaseService.exportAttendanceToCSV(start, end, selectedClass, division);
+      if (!selectedDate || !defaultClass) {
+        toast.error("Please select a date first");
+        return;
+      }
       
-      // Create a CSV download
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      // Create CSV content
+      let csvContent = "Tr. No.,Name,Division,Subject,Status\n";
+      
+      getSortedStudents().forEach(student => {
+        const row = [
+          student.trNo,
+          student.name,
+          student.division || "",
+          student.subject || "",
+          viewMode
+        ].map(value => `"${value}"`).join(",");
+        
+        csvContent += row + "\n";
+      });
+      
+      // Create download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
+      const formattedDate = selectedDate.replace(/-/g, '');
       
       link.setAttribute('href', url);
-      link.setAttribute('download', `attendance_${start}_to_${end}${division ? `_${division}` : ''}.csv`);
+      link.setAttribute('download', `attendance_${formattedDate}_${viewMode}.csv`);
       link.style.visibility = 'hidden';
       
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       
-      toast.success('Attendance data exported successfully');
+      toast.success('Report exported successfully');
     } catch (error) {
-      console.error("Error exporting attendance data:", error);
-      toast.error("Failed to export attendance data");
+      console.error("Error exporting report:", error);
+      toast.error("Failed to export report");
     } finally {
       setLoading(prev => ({ ...prev, export: false }));
     }
+  };
+  
+  const handleExportAll = async () => {
+    try {
+      setLoading(prev => ({ ...prev, exportAll: true }));
+      
+      if (!defaultClass || availableDates.length === 0) {
+        toast.error("No attendance data available");
+        return;
+      }
+      
+      const csv = await supabaseService.exportAttendanceToCSV('', '', defaultClass, '');
+      
+      // Create download
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', `all_attendance_data.csv`);
+      link.style.visibility = 'hidden';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success('All attendance data exported successfully');
+    } catch (error) {
+      console.error("Error exporting all data:", error);
+      toast.error("Failed to export all data");
+    } finally {
+      setLoading(prev => ({ ...prev, exportAll: false }));
+    }
+  };
+  
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return null;
+    }
+    
+    return sortDirection === 'asc' ? 
+      <ArrowUp className="inline-block ml-1 h-4 w-4" /> : 
+      <ArrowDown className="inline-block ml-1 h-4 w-4" />;
   };
   
   return (
@@ -290,79 +254,128 @@ export function AttendanceReport() {
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-          {/* Class Selection */}
-          <ClassSelector 
-            classes={classes}
-            selectedClass={selectedClass}
-            onChange={handleClassChange}
-            disabled={loading.classes}
-          />
-          
-          {/* Report Type Tabs */}
-          <ReportTypeTabs 
-            selectedTab={selectedTab}
-            onValueChange={handleTabChange}
-          />
-        </div>
-        
-        {/* Division Selection */}
-        {selectedClass && divisions.length > 0 && (
-          <DivisionSelector
-            divisions={divisions}
-            selectedDivision={selectedDivision}
-            onValueChange={handleDivisionChange}
-            disabled={loading.divisions}
-          />
-        )}
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           {/* Date Selection */}
-          <DateSelector
-            label={selectedTab === "daily" ? "Select Date" : "Start Date"}
-            date={startDate}
-            onSelect={handleDateChange}
-            disabled={loading.attendance}
-          />
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Select Date
+            </label>
+            <Select value={selectedDate} onValueChange={handleDateChange}>
+              <SelectTrigger className="w-full" disabled={loading.dates || availableDates.length === 0}>
+                <SelectValue placeholder="Select a date" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableDates.map(date => (
+                  <SelectItem key={date} value={date}>
+                    {getFormattedDate(date)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           
-          {/* End Date Selection (for weekly/monthly) */}
-          {selectedTab !== "daily" && (
-            <DateSelector
-              label="End Date"
-              date={endDate}
-              onSelect={handleEndDateChange}
-              minDate={startDate}
-              disabled={loading.attendance}
-            />
-          )}
+          {/* View Mode Selection */}
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              View Mode
+            </label>
+            <Select value={viewMode} onValueChange={handleViewModeChange as (value: string) => void}>
+              <SelectTrigger className="w-full" disabled={!selectedDate}>
+                <SelectValue placeholder="Select view mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="present">Present Students</SelectItem>
+                <SelectItem value="absent">Absent Students</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         
-        {/* Export Button */}
-        <div className="flex justify-end mb-6">
+        {/* Export Buttons */}
+        <div className="flex flex-wrap gap-4 mb-6">
           <Button 
-            onClick={exportAttendance} 
-            disabled={loading.export || loading.attendance}
+            onClick={handleExport} 
+            disabled={loading.export || loading.students || !selectedDate}
+            className="flex items-center gap-2"
           >
-            {loading.export ? "Exporting..." : "Export to CSV"}
+            <Download size={16} />
+            {loading.export ? "Exporting..." : "Export Current View"}
+          </Button>
+          
+          <Button 
+            onClick={handleExportAll} 
+            disabled={loading.exportAll || availableDates.length === 0}
+            variant="outline"
+            className="flex items-center gap-2"
+          >
+            <FileText size={16} />
+            {loading.exportAll ? "Exporting..." : "Export All Dates Data"}
           </Button>
         </div>
         
-        {/* Attendance Summary Chart */}
-        <AttendanceSummaryChart
-          startDate={startDate}
-          endDate={endDate || startDate}
-          selectedDivision={selectedDivision}
-          loading={loading.attendance}
-          summaryData={summaryData}
-        />
-        
-        {/* Attendance Table */}
-        <AttendanceTable
-          selectedTab={selectedTab}
-          selectedClass={selectedClass}
-          selectedDivision={selectedDivision}
-          loading={loading.attendance}
-          attendanceData={attendanceData}
-        />
+        {/* Student Table */}
+        {selectedDate ? (
+          <div className="overflow-x-auto">
+            <table className="nadi-table w-full">
+              <thead>
+                <tr>
+                  <th onClick={() => toggleSort('trNo')} className="cursor-pointer">
+                    Tr. No. {getSortIcon('trNo')}
+                  </th>
+                  <th onClick={() => toggleSort('name')} className="cursor-pointer">
+                    Name {getSortIcon('name')}
+                  </th>
+                  <th onClick={() => toggleSort('division')} className="cursor-pointer">
+                    Division {getSortIcon('division')}
+                  </th>
+                  <th onClick={() => toggleSort('subject')} className="cursor-pointer">
+                    Subject {getSortIcon('subject')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading.students ? (
+                  <tr>
+                    <td colSpan={4} className="text-center py-6">Loading students...</td>
+                  </tr>
+                ) : getSortedStudents().length > 0 ? (
+                  getSortedStudents().map(student => (
+                    <tr key={student.id}>
+                      <td>{student.trNo}</td>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          {student.photo && (
+                            <img
+                              src={student.photo}
+                              alt={student.name}
+                              className="w-8 h-8 rounded-full object-cover"
+                            />
+                          )}
+                          {student.name}
+                        </div>
+                      </td>
+                      <td>{student.division || "-"}</td>
+                      <td>{student.subject || "-"}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={4} className="text-center py-6">
+                      No {viewMode === 'present' ? 'present' : 'absent'} students found
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-8 border rounded-md bg-gray-50">
+            <p className="text-muted-foreground">
+              {availableDates.length === 0 ? 
+                "No attendance data available yet" : 
+                "Please select a date to view attendance"}
+            </p>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

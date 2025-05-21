@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Check, X } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -30,57 +30,71 @@ import {
 } from "@/components/ui/table";
 
 export function AttendanceForm() {
-  const [classes, setClasses] = useState<Class[]>([]);
-  const [selectedClass, setSelectedClass] = useState<string>("");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [dateSubmitted, setDateSubmitted] = useState<boolean>(false);
   const [trNumber, setTrNumber] = useState<string>("");
   const [presentStudents, setPresentStudents] = useState<Student[]>([]);
+  const [allStudents, setAllStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState({
-    classes: false,
     submit: false,
-    attendance: false
+    attendance: false,
+    markPresent: false
   });
 
-  // Load classes on component mount
+  // Default to first class
+  const [defaultClass, setDefaultClass] = useState<string>("");
+
+  // Load default class on component mount
   useEffect(() => {
-    loadClasses();
+    loadDefaultClass();
   }, []);
 
-  // Load attendance data for the selected date and class
+  // Load attendance data for the selected date and default class when date is submitted
   useEffect(() => {
-    if (selectedClass && selectedDate) {
+    if (defaultClass && dateSubmitted) {
       loadAttendanceData();
+      loadAllStudents();
     }
-  }, [selectedClass, selectedDate]);
+  }, [defaultClass, selectedDate, dateSubmitted]);
 
-  const loadClasses = async () => {
+  const loadDefaultClass = async () => {
     try {
-      setLoading(prev => ({ ...prev, classes: true }));
       const loadedClasses = await supabaseService.getClasses();
-      setClasses(loadedClasses);
       
       // Auto-select first class if any
       if (loadedClasses.length > 0) {
-        setSelectedClass(loadedClasses[0].id);
+        setDefaultClass(loadedClasses[0].id);
       }
     } catch (error) {
-      console.error("Error loading classes:", error);
+      console.error("Error loading default class:", error);
       toast.error("Failed to load classes");
-    } finally {
-      setLoading(prev => ({ ...prev, classes: false }));
+    }
+  };
+
+  const loadAllStudents = async () => {
+    try {
+      if (!defaultClass) return;
+      
+      const students = await supabaseService.getStudentsByClass(defaultClass);
+      setAllStudents(students);
+    } catch (error) {
+      console.error("Error loading students:", error);
+      toast.error("Failed to load students");
     }
   };
 
   const loadAttendanceData = async () => {
     try {
       setLoading(prev => ({ ...prev, attendance: true }));
+      if (!defaultClass) return;
+      
       const dateStr = formatDate(selectedDate);
       
       // Get attendance records for the selected date and class
-      const records = await supabaseService.getAttendanceByDateAndClass(dateStr, selectedClass);
+      const records = await supabaseService.getAttendanceByDateAndClass(dateStr, defaultClass);
       
       // Get all students for this class with present status
-      const students = await supabaseService.getStudentsByClass(selectedClass);
+      const students = await supabaseService.getStudentsByClass(defaultClass);
       
       // Filter to get only students marked as present
       const studentsPresent = students.filter(student => 
@@ -96,21 +110,57 @@ export function AttendanceForm() {
     }
   };
 
-  const handleClassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedClass(e.target.value);
-  };
-
   const handleDateChange = (date: Date | undefined) => {
     if (date) {
       setSelectedDate(date);
+      setDateSubmitted(false); // Reset submission state when date changes
+      setTrNumber(""); // Clear TR number input
+      setPresentStudents([]); // Clear present students list
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleDateSubmit = async () => {
+    if (!defaultClass) {
+      toast.error("No class available");
+      return;
+    }
+    
+    try {
+      setLoading(prev => ({ ...prev, submit: true }));
+      
+      const dateStr = formatDate(selectedDate);
+      const allStudents = await supabaseService.getStudentsByClass(defaultClass);
+      
+      // Mark all students as absent first by ensuring records exist
+      for (const student of allStudents) {
+        await supabaseService.markAttendance({
+          date: dateStr,
+          classId: defaultClass,
+          studentId: student.id,
+          status: 'absent'
+        });
+      }
+      
+      setDateSubmitted(true);
+      toast.success(`Attendance sheet initialized for ${format(selectedDate, "PPP")}`);
+    } catch (error) {
+      console.error("Error initializing attendance:", error);
+      toast.error("Failed to initialize attendance");
+    } finally {
+      setLoading(prev => ({ ...prev, submit: false }));
+    }
+  };
+
+  const handleMarkPresent = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!selectedClass) {
-      toast.error("Please select a class first");
+    if (!defaultClass) {
+      toast.error("No class available");
+      return;
+    }
+    
+    if (!dateSubmitted) {
+      toast.error("Please set the date first");
       return;
     }
     
@@ -120,14 +170,14 @@ export function AttendanceForm() {
     }
     
     try {
-      setLoading(prev => ({ ...prev, submit: true }));
+      setLoading(prev => ({ ...prev, markPresent: true }));
       
       // Find student by Tr. No.
-      const students = await supabaseService.getStudentsByClass(selectedClass);
+      const students = await supabaseService.getStudentsByClass(defaultClass);
       const student = students.find(s => s.trNo === trNumber.trim());
       
       if (!student) {
-        toast.error(`No student found with Tr. No. ${trNumber} in this class`);
+        toast.error(`No student found with Tr. No. ${trNumber}`);
         return;
       }
       
@@ -135,7 +185,7 @@ export function AttendanceForm() {
       const dateStr = formatDate(selectedDate);
       await supabaseService.markAttendance({
         date: dateStr,
-        classId: selectedClass,
+        classId: defaultClass,
         studentId: student.id,
         status: 'present'
       });
@@ -151,7 +201,7 @@ export function AttendanceForm() {
       console.error("Error marking attendance:", error);
       toast.error("Failed to mark attendance");
     } finally {
-      setLoading(prev => ({ ...prev, submit: false }));
+      setLoading(prev => ({ ...prev, markPresent: false }));
     }
   };
 
@@ -161,29 +211,8 @@ export function AttendanceForm() {
         <CardTitle>Mark Attendance</CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Class Selection */}
-            <div>
-              <label htmlFor="class-select" className="block text-sm font-medium mb-2">
-                Select Class or Subject
-              </label>
-              <select
-                id="class-select"
-                value={selectedClass}
-                onChange={handleClassChange}
-                className="w-full p-2 border rounded-md"
-                disabled={loading.classes}
-              >
-                <option value="" disabled>Select a class</option>
-                {classes.map((classItem) => (
-                  <option key={classItem.id} value={classItem.id}>
-                    {classItem.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            
             {/* Date Selection */}
             <div>
               <label className="block text-sm font-medium mb-2">Select Date</label>
@@ -195,6 +224,7 @@ export function AttendanceForm() {
                       "w-full justify-start text-left font-normal",
                       !selectedDate && "text-muted-foreground"
                     )}
+                    disabled={loading.submit}
                   >
                     <CalendarIcon className="mr-2 h-4 w-4" />
                     {selectedDate ? format(selectedDate, "PPP") : <span>Pick a date</span>}
@@ -211,80 +241,97 @@ export function AttendanceForm() {
                 </PopoverContent>
               </Popover>
             </div>
-          </div>
-          
-          {/* Tr. No. Input */}
-          <div className="space-y-2">
-            <label htmlFor="tr-number" className="block text-sm font-medium">
-              Enter Tr. No. to Mark Present
-            </label>
-            <div className="flex space-x-2">
-              <Input
-                id="tr-number"
-                type="number"
-                value={trNumber}
-                onChange={(e) => setTrNumber(e.target.value)}
-                placeholder="Enter Tr. No."
-                className="flex-1"
-              />
+            
+            {/* Submit Button */}
+            <div className="flex items-end">
               <Button 
-                type="submit" 
-                disabled={loading.submit || !selectedClass}
+                type="button" 
+                onClick={handleDateSubmit}
+                disabled={loading.submit || !defaultClass}
+                className="mb-2"
               >
-                {loading.submit ? "Marking..." : "Mark Present"}
+                {loading.submit ? "Setting..." : "Set Date"}
               </Button>
             </div>
           </div>
-        </form>
-        
-        {/* Display present students */}
-        <div className="mt-8">
-          <h3 className="text-lg font-medium mb-4">
-            Students Present on {format(selectedDate, "PPP")}
-          </h3>
           
-          {loading.attendance ? (
-            <div className="text-center py-6">
-              <p>Loading data...</p>
-            </div>
-          ) : presentStudents.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Tr. No.</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Division</TableHead>
-                  <TableHead>Subject</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {presentStudents.map((student) => (
-                  <TableRow key={student.id}>
-                    <TableCell>{student.trNo}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {student.photo && (
-                          <img
-                            src={student.photo}
-                            alt={student.name}
-                            className="w-8 h-8 rounded-full object-cover"
-                          />
-                        )}
-                        {student.name}
-                      </div>
-                    </TableCell>
-                    <TableCell>{student.division || "-"}</TableCell>
-                    <TableCell>{student.subject || "-"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <div className="text-center py-6 border rounded-md bg-gray-50">
-              <p className="text-muted-foreground">No students marked present yet</p>
+          {/* Tr. No. Input - Only shown after date is submitted */}
+          {dateSubmitted && (
+            <div className="space-y-2">
+              <label htmlFor="tr-number" className="block text-sm font-medium">
+                Enter Tr. No. to Mark Present
+              </label>
+              <div className="flex space-x-2">
+                <Input
+                  id="tr-number"
+                  type="text"
+                  value={trNumber}
+                  onChange={(e) => setTrNumber(e.target.value)}
+                  placeholder="Enter Tr. No."
+                  className="flex-1"
+                />
+                <Button 
+                  type="button" 
+                  onClick={handleMarkPresent}
+                  disabled={loading.markPresent || !trNumber}
+                >
+                  {loading.markPresent ? "Marking..." : "Mark Present"}
+                </Button>
+              </div>
             </div>
           )}
-        </div>
+        </form>
+        
+        {/* Display present students - Only shown after date is submitted */}
+        {dateSubmitted && (
+          <div className="mt-8">
+            <h3 className="text-lg font-medium mb-4">
+              Students Present on {format(selectedDate, "PPP")}
+            </h3>
+            
+            {loading.attendance ? (
+              <div className="text-center py-6">
+                <p>Loading data...</p>
+              </div>
+            ) : presentStudents.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Tr. No.</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Division</TableHead>
+                    <TableHead>Subject</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {presentStudents.map((student) => (
+                    <TableRow key={student.id}>
+                      <TableCell>{student.trNo}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {student.photo && (
+                            <img
+                              src={student.photo}
+                              alt={student.name}
+                              className="w-8 h-8 rounded-full object-cover"
+                            />
+                          )}
+                          {student.name}
+                        </div>
+                      </TableCell>
+                      <TableCell>{student.division || "-"}</TableCell>
+                      <TableCell>{student.subject || "-"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="text-center py-6 border rounded-md bg-gray-50">
+                <p className="text-muted-foreground">No students marked present yet</p>
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

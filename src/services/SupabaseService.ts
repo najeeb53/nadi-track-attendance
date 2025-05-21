@@ -1,4 +1,3 @@
-
 import { supabase } from "@/integrations/supabase/client";
 
 export interface Class {
@@ -566,6 +565,28 @@ class SupabaseService {
     });
     
     return csv;
+  }
+
+  // Add this method to get all dates for which attendance was recorded for a class
+  async getAttendanceDatesByClass(classId: string): Promise<string[]> {
+    try {
+      const { data, error } = await this.supabase
+        .from('attendance')
+        .select('date')
+        .eq('class_id', classId)
+        .order('date', { ascending: false })
+        .distinct();
+        
+      if (error) {
+        console.error('Error fetching attendance dates:', error);
+        throw error;
+      }
+      
+      return data.map(item => item.date);
+    } catch (error) {
+      console.error('Error in getAttendanceDatesByClass:', error);
+      throw error;
+    }
   }
 }
 

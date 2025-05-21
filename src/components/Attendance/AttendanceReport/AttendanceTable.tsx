@@ -1,49 +1,69 @@
 
 import React from 'react';
 import { Student } from "@/services/SupabaseService";
+import { ArrowDown, ArrowUp } from "lucide-react";
 
 interface ExtendedStudent extends Student {
   presentDays?: number;
   totalDays?: number;
 }
 
+type SortDirection = 'asc' | 'desc';
+type SortField = keyof ExtendedStudent;
+
 interface AttendanceTableProps {
-  selectedTab: string;
-  selectedClass: string;
-  selectedDivision: string;
+  students: ExtendedStudent[];
   loading: boolean;
-  attendanceData: ExtendedStudent[];
+  sortField: SortField;
+  sortDirection: SortDirection;
+  onSort: (field: SortField) => void;
 }
 
 export function AttendanceTable({ 
-  selectedTab, 
-  selectedClass, 
-  selectedDivision, 
-  loading, 
-  attendanceData 
+  students,
+  loading,
+  sortField,
+  sortDirection,
+  onSort
 }: AttendanceTableProps) {
+  
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return null;
+    }
+    
+    return sortDirection === 'asc' ? 
+      <ArrowUp className="inline-block ml-1 h-4 w-4" /> : 
+      <ArrowDown className="inline-block ml-1 h-4 w-4" />;
+  };
+  
   return (
     <>
       {loading ? (
         <div className="text-center py-8">
-          <p>Loading attendance data...</p>
+          <p>Loading data...</p>
         </div>
-      ) : selectedClass && attendanceData.length > 0 ? (
+      ) : students.length > 0 ? (
         <div className="overflow-x-auto mt-4">
-          <table className="nadi-table">
+          <table className="nadi-table w-full">
             <thead>
               <tr>
-                <th>Tr. No.</th>
-                <th>Name</th>
-                <th>Division</th>
-                <th>Subject</th>
-                {selectedTab !== "daily" && (
-                  <th>Present Days</th>
-                )}
+                <th onClick={() => onSort('trNo')} className="cursor-pointer">
+                  Tr. No. {getSortIcon('trNo')}
+                </th>
+                <th onClick={() => onSort('name')} className="cursor-pointer">
+                  Name {getSortIcon('name')}
+                </th>
+                <th onClick={() => onSort('division')} className="cursor-pointer">
+                  Division {getSortIcon('division')}
+                </th>
+                <th onClick={() => onSort('subject')} className="cursor-pointer">
+                  Subject {getSortIcon('subject')}
+                </th>
               </tr>
             </thead>
             <tbody>
-              {attendanceData.map((student: ExtendedStudent) => (
+              {students.map((student) => (
                 <tr key={student.id}>
                   <td>{student.trNo}</td>
                   <td>
@@ -60,9 +80,6 @@ export function AttendanceTable({
                   </td>
                   <td>{student.division || "-"}</td>
                   <td>{student.subject || "-"}</td>
-                  {selectedTab !== "daily" && (
-                    <td className="text-green-600">{student.presentDays}</td>
-                  )}
                 </tr>
               ))}
             </tbody>
@@ -70,11 +87,7 @@ export function AttendanceTable({
         </div>
       ) : (
         <div className="text-center py-8">
-          {!selectedClass ? (
-            <p>Please select a class to view reports</p>
-          ) : (
-            <p>No students marked present {selectedDivision ? `in division ${selectedDivision}` : 'in this class'}</p>
-          )}
+          <p>No students found</p>
         </div>
       )}
     </>
