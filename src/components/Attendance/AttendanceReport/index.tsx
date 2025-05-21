@@ -1,34 +1,21 @@
 
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CalendarIcon } from "lucide-react";
-import { format } from "date-fns";
 import { supabaseService, Class, Student } from "@/services/SupabaseService";
 import { formatDate, getStartOfWeek, getEndOfWeek, getStartOfMonth, getEndOfMonth, getDatesBetween } from "@/utils/dateUtils";
-import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { ResponsiveContainer, PieChart, Pie, Cell, Legend, Tooltip } from 'recharts';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { ClassSelector } from './ClassSelector';
+import { DivisionSelector } from './DivisionSelector';
+import { ReportTypeTabs } from './ReportTypeTabs';
+import { DateSelector } from './DateSelector';
+import { AttendanceSummaryChart } from './AttendanceSummaryChart';
+import { AttendanceTable } from './AttendanceTable';
 
 export function AttendanceReport() {
   const [classes, setClasses] = useState<Class[]>([]);
@@ -223,7 +210,7 @@ export function AttendanceReport() {
         const totalPresent = Object.values(stats.presentCount).reduce((sum: number, count: any) => sum + Number(count), 0);
         // Convert to number to ensure it's a valid arithmetic operand
         const totalPossible = Number(students.length) * Number(dates.length);
-        const totalAbsent = totalPossible - totalPresent;
+        const totalAbsent = Number(totalPossible) - Number(totalPresent);
         
         setSummaryData([
           { name: 'Present', value: totalPresent },
@@ -295,9 +282,6 @@ export function AttendanceReport() {
     }
   };
   
-  // Pie chart colors
-  const COLORS = ['#0ea5e9', '#f97316'];
-  
   return (
     <Card>
       <CardHeader>
@@ -306,131 +290,48 @@ export function AttendanceReport() {
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           {/* Class Selection */}
-          <div>
-            <label htmlFor="report-class-select" className="block text-sm font-medium mb-2">
-              Select Class or Subject
-            </label>
-            <select
-              id="report-class-select"
-              value={selectedClass}
-              onChange={handleClassChange}
-              className="w-full p-2 border rounded-md"
-              disabled={loading.classes}
-            >
-              <option value="" disabled>Select a class</option>
-              {classes.map((classItem) => (
-                <option key={classItem.id} value={classItem.id}>
-                  {classItem.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <ClassSelector 
+            classes={classes}
+            selectedClass={selectedClass}
+            onChange={handleClassChange}
+            disabled={loading.classes}
+          />
           
           {/* Report Type Tabs */}
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Report Type
-            </label>
-            <Tabs defaultValue="daily" value={selectedTab} onValueChange={handleTabChange}>
-              <TabsList className="grid grid-cols-3 w-full">
-                <TabsTrigger value="daily">Daily</TabsTrigger>
-                <TabsTrigger value="weekly">Weekly</TabsTrigger>
-                <TabsTrigger value="monthly">Monthly</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
+          <ReportTypeTabs 
+            selectedTab={selectedTab}
+            onValueChange={handleTabChange}
+          />
         </div>
         
         {/* Division Selection */}
         {selectedClass && divisions.length > 0 && (
-          <div className="mb-6">
-            <label className="block text-sm font-medium mb-2">
-              Select Division
-            </label>
-            <Select value={selectedDivision} onValueChange={handleDivisionChange}>
-              <SelectTrigger className="w-full" disabled={loading.divisions}>
-                <SelectValue placeholder="All Divisions" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">All Divisions</SelectItem>
-                {divisions.map((division) => (
-                  <SelectItem key={division} value={division}>
-                    {division}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <DivisionSelector
+            divisions={divisions}
+            selectedDivision={selectedDivision}
+            onValueChange={handleDivisionChange}
+            disabled={loading.divisions}
+          />
         )}
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           {/* Date Selection */}
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              {selectedTab === "daily" ? "Select Date" : "Start Date"}
-            </label>
-            <div>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      !startDate && "text-muted-foreground"
-                    )}
-                    disabled={loading.attendance}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {startDate ? format(startDate, "PPP") : <span>Pick a date</span>}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0 pointer-events-auto" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={startDate}
-                    onSelect={handleDateChange}
-                    initialFocus
-                    className="p-3"
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-          </div>
+          <DateSelector
+            label={selectedTab === "daily" ? "Select Date" : "Start Date"}
+            date={startDate}
+            onSelect={handleDateChange}
+            disabled={loading.attendance}
+          />
           
           {/* End Date Selection (for weekly/monthly) */}
           {selectedTab !== "daily" && (
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                End Date
-              </label>
-              <div>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !endDate && "text-muted-foreground"
-                      )}
-                      disabled={loading.attendance}
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {endDate ? format(endDate, "PPP") : <span>Pick a date</span>}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0 pointer-events-auto" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={endDate}
-                      onSelect={handleEndDateChange}
-                      initialFocus
-                      disabled={(date) => date < startDate}
-                      className="p-3"
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
+            <DateSelector
+              label="End Date"
+              date={endDate}
+              onSelect={handleEndDateChange}
+              minDate={startDate}
+              disabled={loading.attendance}
+            />
           )}
         </div>
         
@@ -445,108 +346,22 @@ export function AttendanceReport() {
         </div>
         
         {/* Attendance Summary Chart */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>Attendance Summary</CardTitle>
-            <CardDescription>
-              {selectedTab === "daily" 
-                ? format(startDate, "PPP")
-                : `${format(startDate, "PPP")} to ${endDate ? format(endDate, "PPP") : format(startDate, "PPP")}`}
-              {selectedDivision && ` - Division: ${selectedDivision}`}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading.attendance ? (
-              <div className="h-64 flex items-center justify-center">
-                <p>Loading data...</p>
-              </div>
-            ) : (
-              <div className="h-64">
-                {summaryData.length > 0 && summaryData.some(item => item.value > 0) ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={summaryData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="value"
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      >
-                        {summaryData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="h-full flex items-center justify-center">
-                    <p className="text-muted-foreground">No attendance data available</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <AttendanceSummaryChart
+          startDate={startDate}
+          endDate={endDate || startDate}
+          selectedDivision={selectedDivision}
+          loading={loading.attendance}
+          summaryData={summaryData}
+        />
         
-        {/* Attendance Table - Only showing present students */}
-        {loading.attendance ? (
-          <div className="text-center py-8">
-            <p>Loading attendance data...</p>
-          </div>
-        ) : selectedClass && attendanceData.length > 0 ? (
-          <div className="overflow-x-auto mt-4">
-            <table className="nadi-table">
-              <thead>
-                <tr>
-                  <th>Tr. No.</th>
-                  <th>Name</th>
-                  <th>Division</th>
-                  <th>Subject</th>
-                  {selectedTab !== "daily" && (
-                    <th>Present Days</th>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {attendanceData.map((student: any) => (
-                  <tr key={student.id}>
-                    <td>{student.trNo}</td>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        {student.photo && (
-                          <img
-                            src={student.photo}
-                            alt={student.name}
-                            className="w-8 h-8 rounded-full object-cover"
-                          />
-                        )}
-                        {student.name}
-                      </div>
-                    </td>
-                    <td>{student.division || "-"}</td>
-                    <td>{student.subject || "-"}</td>
-                    {selectedTab !== "daily" && (
-                      <td className="text-green-600">{student.presentDays}</td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="text-center py-8">
-            {!selectedClass ? (
-              <p>Please select a class to view reports</p>
-            ) : (
-              <p>No students marked present {selectedDivision ? `in division ${selectedDivision}` : 'in this class'}</p>
-            )}
-          </div>
-        )}
+        {/* Attendance Table */}
+        <AttendanceTable
+          selectedTab={selectedTab}
+          selectedClass={selectedClass}
+          selectedDivision={selectedDivision}
+          loading={loading.attendance}
+          attendanceData={attendanceData}
+        />
       </CardContent>
     </Card>
   );
