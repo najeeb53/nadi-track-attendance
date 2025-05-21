@@ -1,3 +1,4 @@
+
 import { supabase } from "@/integrations/supabase/client";
 
 export interface Class {
@@ -574,15 +575,16 @@ class SupabaseService {
         .from('attendance')
         .select('date')
         .eq('class_id', classId)
-        .order('date', { ascending: false })
-        .distinct();
+        .order('date', { ascending: false });
         
       if (error) {
         console.error('Error fetching attendance dates:', error);
         throw error;
       }
       
-      return data.map(item => item.date);
+      // Extract unique dates manually since we can't use distinct()
+      const uniqueDates = [...new Set(data.map(item => item.date))];
+      return uniqueDates;
     } catch (error) {
       console.error('Error in getAttendanceDatesByClass:', error);
       throw error;
