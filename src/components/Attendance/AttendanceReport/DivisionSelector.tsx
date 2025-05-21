@@ -26,7 +26,7 @@ export function DivisionSelector({ divisions, selectedDivision, onValueChange, d
           <SelectValue placeholder="All Divisions" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">All Divisions</SelectItem>
+          <SelectItem value="all">All Divisions</SelectItem>
           {divisions.map((division) => (
             <SelectItem key={division} value={division}>
               {division}

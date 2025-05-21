@@ -27,7 +27,7 @@ export function AttendanceReport() {
   const [attendanceData, setAttendanceData] = useState<any[]>([]);
   const [summaryData, setSummaryData] = useState<any[]>([]);
   const [divisions, setDivisions] = useState<string[]>([]);
-  const [selectedDivision, setSelectedDivision] = useState<string>("");
+  const [selectedDivision, setSelectedDivision] = useState<string>("all");
   const [loading, setLoading] = useState({
     classes: false,
     students: false,
@@ -47,7 +47,7 @@ export function AttendanceReport() {
       loadDivisions();
     } else {
       setDivisions([]);
-      setSelectedDivision("");
+      setSelectedDivision("all");
     }
   }, [selectedClass]);
   
@@ -108,7 +108,7 @@ export function AttendanceReport() {
       setDivisions(divisions);
       
       // Auto-select "All Divisions" as default
-      setSelectedDivision("");
+      setSelectedDivision("all");
     } catch (error) {
       console.error("Error loading divisions:", error);
       toast.error("Failed to load divisions");
@@ -122,7 +122,7 @@ export function AttendanceReport() {
       setLoading(prev => ({ ...prev, students: true }));
       let loadedStudents;
       
-      if (selectedDivision) {
+      if (selectedDivision && selectedDivision !== "all") {
         // Load students for specific division
         loadedStudents = await supabaseService.getStudentsByClassAndDivision(selectedClass, selectedDivision);
       } else {
@@ -148,7 +148,7 @@ export function AttendanceReport() {
         const dateStr = formatDate(startDate);
         let records;
         
-        if (selectedDivision) {
+        if (selectedDivision && selectedDivision !== "all") {
           // Get attendance records for specific division
           records = await supabaseService.getAttendanceByDateClassAndDivision(dateStr, selectedClass, selectedDivision);
         } else {
@@ -179,7 +179,7 @@ export function AttendanceReport() {
         
         // Get statistics for the date range and division if selected
         let stats;
-        if (selectedDivision) {
+        if (selectedDivision && selectedDivision !== "all") {
           stats = await supabaseService.getAttendanceStatsWithDivision(selectedClass, start, end, selectedDivision);
         } else {
           stats = await supabaseService.getAttendanceStats(selectedClass, start, end);
@@ -227,7 +227,7 @@ export function AttendanceReport() {
   
   const handleClassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedClass(e.target.value);
-    setSelectedDivision(""); // Reset division when class changes
+    setSelectedDivision("all"); // Reset division when class changes
   };
   
   const handleDivisionChange = (value: string) => {
@@ -257,8 +257,9 @@ export function AttendanceReport() {
       const start = formatDate(startDate);
       const end = endDate ? formatDate(endDate) : start;
       
-      // Pass division parameter if selected
-      const csv = await supabaseService.exportAttendanceToCSV(start, end, selectedClass, selectedDivision);
+      // Pass division parameter if selected and not "all"
+      const division = selectedDivision !== "all" ? selectedDivision : "";
+      const csv = await supabaseService.exportAttendanceToCSV(start, end, selectedClass, division);
       
       // Create a CSV download
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -266,7 +267,7 @@ export function AttendanceReport() {
       const url = URL.createObjectURL(blob);
       
       link.setAttribute('href', url);
-      link.setAttribute('download', `attendance_${start}_to_${end}${selectedDivision ? `_${selectedDivision}` : ''}.csv`);
+      link.setAttribute('download', `attendance_${start}_to_${end}${division ? `_${division}` : ''}.csv`);
       link.style.visibility = 'hidden';
       
       document.body.appendChild(link);
