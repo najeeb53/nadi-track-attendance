@@ -169,15 +169,12 @@ export function AttendanceReport() {
           records = await supabaseService.getAttendanceByDateAndClass(dateStr, selectedClass);
         }
         
-        const studentAttendance = students.map(student => {
-          const record = records.find(r => r.studentId === student.id);
-          return {
-            ...student,
-            status: record ? record.status : 'absent'
-          };
-        });
+        // Find students who were marked present
+        const presentStudents = students.filter(student => 
+          records.some(r => r.studentId === student.id && r.status === 'present')
+        );
         
-        setAttendanceData(studentAttendance);
+        setAttendanceData(presentStudents);
         
         // Summary data for pie chart
         const present = records.filter(r => r.status === 'present').length;
@@ -203,26 +200,27 @@ export function AttendanceReport() {
         
         const dates = getDatesBetween(start, end);
         
+        // Find students who were marked present at least once in the date range
+        const presentStudents = students.filter(student => 
+          (stats.presentCount[student.id] || 0) > 0
+        );
+        
         // Calculate summary for each student
-        const studentSummary = students.map(student => {
+        const studentSummary = presentStudents.map(student => {
           const presentCount = stats.presentCount[student.id] || 0;
-          const absentCount = stats.absentCount[student.id] || 0;
           const totalDays = dates.length;
-          const attendanceRate = totalDays > 0 ? (presentCount / totalDays) * 100 : 0;
           
           return {
             ...student,
             presentDays: presentCount,
-            absentDays: absentCount,
-            totalDays,
-            attendanceRate: attendanceRate.toFixed(2)
+            totalDays
           };
         });
         
         setAttendanceData(studentSummary);
         
         // Summary data for pie chart
-        const totalPresent = Object.values(stats.presentCount).reduce((sum, count) => sum + count, 0);
+        const totalPresent = Object.values(stats.presentCount).reduce((sum: number, count: any) => sum + (count as number), 0);
         const totalPossible = students.length * dates.length;
         const totalAbsent = totalPossible - totalPresent;
         
@@ -494,28 +492,22 @@ export function AttendanceReport() {
           </CardContent>
         </Card>
         
-        {/* Attendance Table */}
+        {/* Attendance Table - Only showing present students */}
         {loading.attendance ? (
           <div className="text-center py-8">
             <p>Loading attendance data...</p>
           </div>
-        ) : selectedClass && students.length > 0 ? (
+        ) : selectedClass && attendanceData.length > 0 ? (
           <div className="overflow-x-auto mt-4">
             <table className="nadi-table">
               <thead>
                 <tr>
                   <th>Tr. No.</th>
                   <th>Name</th>
-                  <th>ITS No.</th>
                   <th>Division</th>
-                  {selectedTab === "daily" ? (
-                    <th>Status</th>
-                  ) : (
-                    <>
-                      <th>Present Days</th>
-                      <th>Absent Days</th>
-                      <th>Attendance Rate</th>
-                    </>
+                  <th>Subject</th>
+                  {selectedTab !== "daily" && (
+                    <th>Present Days</th>
                   )}
                 </tr>
               </thead>
@@ -535,24 +527,10 @@ export function AttendanceReport() {
                         {student.name}
                       </div>
                     </td>
-                    <td>{student.itsNo}</td>
                     <td>{student.division || "-"}</td>
-                    {selectedTab === "daily" ? (
-                      <td>
-                        <span 
-                          className={`px-3 py-1 rounded-full text-white ${
-                            student.status === 'present' ? 'bg-green-600' : 'bg-red-600'
-                          }`}
-                        >
-                          {student.status === 'present' ? 'Present' : 'Absent'}
-                        </span>
-                      </td>
-                    ) : (
-                      <>
-                        <td className="text-green-600">{student.presentDays}</td>
-                        <td className="text-red-600">{student.absentDays}</td>
-                        <td>{student.attendanceRate}%</td>
-                      </>
+                    <td>{student.subject || "-"}</td>
+                    {selectedTab !== "daily" && (
+                      <td className="text-green-600">{student.presentDays}</td>
                     )}
                   </tr>
                 ))}
@@ -564,7 +542,7 @@ export function AttendanceReport() {
             {!selectedClass ? (
               <p>Please select a class to view reports</p>
             ) : (
-              <p>No students found {selectedDivision ? `in division ${selectedDivision}` : 'in this class'}</p>
+              <p>No students marked present {selectedDivision ? `in division ${selectedDivision}` : 'in this class'}</p>
             )}
           </div>
         )}

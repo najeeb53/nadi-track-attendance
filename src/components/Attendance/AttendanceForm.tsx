@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { CalendarIcon } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -13,65 +15,44 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { CalendarIcon } from "lucide-react";
-import { format } from "date-fns";
-import { supabaseService, Student, Class } from "@/services/SupabaseService";
-import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { supabaseService, Class, Student } from "@/services/SupabaseService";
 import { formatDate } from "@/utils/dateUtils";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from "@/components/ui/table";
 
 export function AttendanceForm() {
   const [classes, setClasses] = useState<Class[]>([]);
   const [selectedClass, setSelectedClass] = useState<string>("");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [students, setStudents] = useState<Student[]>([]);
-  const [attendanceRecords, setAttendanceRecords] = useState<Record<string, 'present' | 'absent'>>({});
-  const [divisions, setDivisions] = useState<string[]>([]);
-  const [selectedDivision, setSelectedDivision] = useState<string>("");
+  const [trNumber, setTrNumber] = useState<string>("");
+  const [presentStudents, setPresentStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState({
     classes: false,
-    students: false,
-    attendance: false,
-    saving: false,
-    divisions: false
+    submit: false,
+    attendance: false
   });
-  
+
   // Load classes on component mount
   useEffect(() => {
     loadClasses();
   }, []);
-  
-  // Load divisions when class changes
-  useEffect(() => {
-    if (selectedClass) {
-      loadDivisions();
-    } else {
-      setDivisions([]);
-      setSelectedDivision("");
-    }
-  }, [selectedClass]);
-  
-  // Load students when class and division changes
-  useEffect(() => {
-    if (selectedClass) {
-      loadStudents();
-    }
-  }, [selectedClass, selectedDivision]);
-  
-  // Load attendance records when class, division or date changes
+
+  // Load attendance data for the selected date and class
   useEffect(() => {
     if (selectedClass && selectedDate) {
-      loadAttendanceRecords();
+      loadAttendanceData();
     }
-  }, [selectedClass, selectedDivision, selectedDate]);
-  
+  }, [selectedClass, selectedDate]);
+
   const loadClasses = async () => {
     try {
       setLoading(prev => ({ ...prev, classes: true }));
@@ -89,154 +70,123 @@ export function AttendanceForm() {
       setLoading(prev => ({ ...prev, classes: false }));
     }
   };
-  
-  const loadDivisions = async () => {
-    try {
-      setLoading(prev => ({ ...prev, divisions: true }));
-      const divisions = await supabaseService.getDivisionsByClass(selectedClass);
-      setDivisions(divisions);
-      
-      // Auto-select "All Divisions" as default
-      setSelectedDivision("");
-    } catch (error) {
-      console.error("Error loading divisions:", error);
-      toast.error("Failed to load divisions");
-    } finally {
-      setLoading(prev => ({ ...prev, divisions: false }));
-    }
-  };
-  
-  const loadStudents = async () => {
-    try {
-      setLoading(prev => ({ ...prev, students: true }));
-      let loadedStudents;
-      
-      if (selectedDivision) {
-        // Load students for specific division
-        loadedStudents = await supabaseService.getStudentsByClassAndDivision(selectedClass, selectedDivision);
-      } else {
-        // Load all students for the class
-        loadedStudents = await supabaseService.getStudentsByClass(selectedClass);
-      }
-      
-      setStudents(loadedStudents);
-    } catch (error) {
-      console.error("Error loading students:", error);
-      toast.error("Failed to load students");
-    } finally {
-      setLoading(prev => ({ ...prev, students: false }));
-    }
-  };
-  
-  const loadAttendanceRecords = async () => {
+
+  const loadAttendanceData = async () => {
     try {
       setLoading(prev => ({ ...prev, attendance: true }));
       const dateStr = formatDate(selectedDate);
+      
+      // Get attendance records for the selected date and class
       const records = await supabaseService.getAttendanceByDateAndClass(dateStr, selectedClass);
       
-      const recordMap: Record<string, 'present' | 'absent'> = {};
-      records.forEach(record => {
-        recordMap[record.studentId] = record.status;
-      });
+      // Get all students for this class with present status
+      const students = await supabaseService.getStudentsByClass(selectedClass);
       
-      // Set default status as absent for all students
-      students.forEach(student => {
-        if (!recordMap[student.id]) {
-          recordMap[student.id] = 'absent';
-        }
-      });
+      // Filter to get only students marked as present
+      const studentsPresent = students.filter(student => 
+        records.some(record => record.studentId === student.id && record.status === 'present')
+      );
       
-      setAttendanceRecords(recordMap);
+      setPresentStudents(studentsPresent);
     } catch (error) {
-      console.error("Error loading attendance records:", error);
-      toast.error("Failed to load attendance records");
+      console.error("Error loading attendance data:", error);
+      toast.error("Failed to load attendance data");
     } finally {
       setLoading(prev => ({ ...prev, attendance: false }));
     }
   };
-  
+
   const handleClassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedClass(e.target.value);
-    setSelectedDivision(""); // Reset division when class changes
   };
-  
-  const handleDivisionChange = (value: string) => {
-    setSelectedDivision(value);
-  };
-  
+
   const handleDateChange = (date: Date | undefined) => {
     if (date) {
       setSelectedDate(date);
     }
   };
-  
-  const toggleAttendance = async (studentId: string) => {
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!selectedClass) {
+      toast.error("Please select a class first");
+      return;
+    }
+    
+    if (!trNumber.trim()) {
+      toast.error("Please enter a Tr. Number");
+      return;
+    }
+    
     try {
-      setLoading(prev => ({ ...prev, saving: true }));
+      setLoading(prev => ({ ...prev, submit: true }));
       
-      const currentStatus = attendanceRecords[studentId] || 'absent';
-      const newStatus = currentStatus === 'absent' ? 'present' : 'absent';
+      // Find student by Tr. No.
+      const students = await supabaseService.getStudentsByClass(selectedClass);
+      const student = students.find(s => s.trNo === trNumber.trim());
       
-      setAttendanceRecords(prev => ({
-        ...prev,
-        [studentId]: newStatus
-      }));
+      if (!student) {
+        toast.error(`No student found with Tr. No. ${trNumber} in this class`);
+        return;
+      }
       
-      // Save to database
+      // Mark student as present
+      const dateStr = formatDate(selectedDate);
       await supabaseService.markAttendance({
-        date: formatDate(selectedDate),
+        date: dateStr,
         classId: selectedClass,
-        studentId,
-        status: newStatus
+        studentId: student.id,
+        status: 'present'
       });
       
-      // Show toast
-      toast.success(`${newStatus === 'present' ? 'Present' : 'Absent'} marked successfully`);
+      // Clear input
+      setTrNumber("");
+      
+      // Reload attendance data
+      await loadAttendanceData();
+      
+      toast.success(`${student.name} marked present for ${format(selectedDate, "PPP")}`);
     } catch (error) {
       console.error("Error marking attendance:", error);
       toast.error("Failed to mark attendance");
-      
-      // Revert the optimistic update
-      loadAttendanceRecords();
     } finally {
-      setLoading(prev => ({ ...prev, saving: false }));
+      setLoading(prev => ({ ...prev, submit: false }));
     }
   };
-  
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Mark Attendance</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-          {/* Class Selection */}
-          <div>
-            <label htmlFor="class-select" className="block text-sm font-medium mb-2">
-              Select Class or Subject
-            </label>
-            <select
-              id="class-select"
-              value={selectedClass}
-              onChange={handleClassChange}
-              className="w-full p-2 border rounded-md"
-              disabled={loading.classes}
-            >
-              <option value="" disabled>Select a class</option>
-              {classes.map((classItem) => (
-                <option key={classItem.id} value={classItem.id}>
-                  {classItem.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          {/* Date Selection */}
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Select Date
-            </label>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Class Selection */}
             <div>
+              <label htmlFor="class-select" className="block text-sm font-medium mb-2">
+                Select Class or Subject
+              </label>
+              <select
+                id="class-select"
+                value={selectedClass}
+                onChange={handleClassChange}
+                className="w-full p-2 border rounded-md"
+                disabled={loading.classes}
+              >
+                <option value="" disabled>Select a class</option>
+                {classes.map((classItem) => (
+                  <option key={classItem.id} value={classItem.id}>
+                    {classItem.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            {/* Date Selection */}
+            <div>
+              <label className="block text-sm font-medium mb-2">Select Date</label>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
@@ -245,7 +195,6 @@ export function AttendanceForm() {
                       "w-full justify-start text-left font-normal",
                       !selectedDate && "text-muted-foreground"
                     )}
-                    disabled={loading.attendance}
                   >
                     <CalendarIcon className="mr-2 h-4 w-4" />
                     {selectedDate ? format(selectedDate, "PPP") : <span>Pick a date</span>}
@@ -263,52 +212,56 @@ export function AttendanceForm() {
               </Popover>
             </div>
           </div>
-        </div>
-        
-        {/* Division Selection */}
-        {selectedClass && divisions.length > 0 && (
-          <div className="mb-6">
-            <label className="block text-sm font-medium mb-2">
-              Select Division
+          
+          {/* Tr. No. Input */}
+          <div className="space-y-2">
+            <label htmlFor="tr-number" className="block text-sm font-medium">
+              Enter Tr. No. to Mark Present
             </label>
-            <Select value={selectedDivision} onValueChange={handleDivisionChange}>
-              <SelectTrigger className="w-full" disabled={loading.divisions}>
-                <SelectValue placeholder="All Divisions" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">All Divisions</SelectItem>
-                {divisions.map((division) => (
-                  <SelectItem key={division} value={division}>
-                    {division}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex space-x-2">
+              <Input
+                id="tr-number"
+                type="number"
+                value={trNumber}
+                onChange={(e) => setTrNumber(e.target.value)}
+                placeholder="Enter Tr. No."
+                className="flex-1"
+              />
+              <Button 
+                type="submit" 
+                disabled={loading.submit || !selectedClass}
+              >
+                {loading.submit ? "Marking..." : "Mark Present"}
+              </Button>
+            </div>
           </div>
-        )}
+        </form>
         
-        {/* Attendance Table */}
-        {loading.students || loading.attendance ? (
-          <div className="text-center py-8">
-            <p>Loading...</p>
-          </div>
-        ) : selectedClass && students.length > 0 ? (
-          <div className="overflow-x-auto mt-4">
-            <table className="nadi-table">
-              <thead>
-                <tr>
-                  <th>Tr. No.</th>
-                  <th>Name</th>
-                  <th>ITS No.</th>
-                  <th>Division</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {students.map((student) => (
-                  <tr key={student.id}>
-                    <td>{student.trNo}</td>
-                    <td>
+        {/* Display present students */}
+        <div className="mt-8">
+          <h3 className="text-lg font-medium mb-4">
+            Students Present on {format(selectedDate, "PPP")}
+          </h3>
+          
+          {loading.attendance ? (
+            <div className="text-center py-6">
+              <p>Loading data...</p>
+            </div>
+          ) : presentStudents.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tr. No.</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Division</TableHead>
+                  <TableHead>Subject</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {presentStudents.map((student) => (
+                  <TableRow key={student.id}>
+                    <TableCell>{student.trNo}</TableCell>
+                    <TableCell>
                       <div className="flex items-center gap-2">
                         {student.photo && (
                           <img
@@ -319,33 +272,19 @@ export function AttendanceForm() {
                         )}
                         {student.name}
                       </div>
-                    </td>
-                    <td>{student.itsNo}</td>
-                    <td>{student.division || "-"}</td>
-                    <td>
-                      <Button
-                        variant={attendanceRecords[student.id] === 'present' ? 'default' : 'outline'}
-                        className={attendanceRecords[student.id] === 'present' ? 'bg-green-600 hover:bg-green-700' : ''}
-                        onClick={() => toggleAttendance(student.id)}
-                        disabled={loading.saving}
-                      >
-                        {attendanceRecords[student.id] === 'present' ? 'Present' : 'Absent'}
-                      </Button>
-                    </td>
-                  </tr>
+                    </TableCell>
+                    <TableCell>{student.division || "-"}</TableCell>
+                    <TableCell>{student.subject || "-"}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="text-center py-8">
-            {!selectedClass ? (
-              <p>Please select a class to mark attendance</p>
-            ) : (
-              <p>No students found {selectedDivision ? `in division ${selectedDivision}` : 'in this class'}</p>
-            )}
-          </div>
-        )}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="text-center py-6 border rounded-md bg-gray-50">
+              <p className="text-muted-foreground">No students marked present yet</p>
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
