@@ -1,4 +1,3 @@
-
 import { supabase } from "@/integrations/supabase/client";
 
 export interface Class {
@@ -303,6 +302,25 @@ class SupabaseService {
     }));
   }
   
+  async getAttendanceByDate(date: string): Promise<AttendanceRecord[]> {
+    const { data, error } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('date', date);
+    
+    if (error) {
+      console.error('Error fetching attendance by date:', error);
+      return [];
+    }
+    
+    return data.map(item => ({
+      date: item.date,
+      classId: item.class_id,
+      studentId: item.student_id,
+      status: item.status as 'present' | 'absent'
+    }));
+  }
+  
   async getAttendanceByDateAndClass(date: string, classId: string): Promise<AttendanceRecord[]> {
     const { data, error } = await supabase
       .from('attendance')
@@ -506,12 +524,10 @@ class SupabaseService {
     };
   }
   
-  // Export attendance data to CSV
+  // Export attendance data to CSV across all classes
   async exportAttendanceToCSV(
-    startDate: string, 
-    endDate: string, 
-    classId?: string, 
-    division?: string
+    startDate: string = '', 
+    endDate: string = ''
   ): Promise<string> {
     // Query to fetch attendance records
     let query = supabase
@@ -521,13 +537,15 @@ class SupabaseService {
         classes:class_id(name),
         students:student_id(name, tr_no, its_no, division, subject),
         status
-      `)
-      .gte('date', startDate)
-      .lte('date', endDate);
+      `);
     
-    // Filter by class if specified
-    if (classId) {
-      query = query.eq('class_id', classId);
+    // Add date filters if provided
+    if (startDate) {
+      query = query.gte('date', startDate);
+    }
+    
+    if (endDate) {
+      query = query.lte('date', endDate);
     }
     
     const { data, error } = await query;
@@ -537,18 +555,12 @@ class SupabaseService {
       return '';
     }
     
-    // Filter by division if specified
-    let filteredData = data;
-    if (division) {
-      filteredData = data.filter(record => record.students?.division === division);
-    }
-    
     // Prepare CSV header
     const headers = ['Date', 'Class', 'Division', 'Subject', 'Student Name', 'Tr. No.', 'ITS No.', 'Status'];
     let csv = headers.join(',') + '\n';
     
     // Add records to CSV
-    filteredData.forEach((record: any) => {
+    data.forEach((record: any) => {
       if (record.classes && record.students) {
         const row = [
           record.date,
@@ -568,7 +580,29 @@ class SupabaseService {
     return csv;
   }
 
-  // Add this method to get all dates for which attendance was recorded for a class
+  // Get all dates for which attendance was recorded (across all classes)
+  async getAllAttendanceDates(): Promise<string[]> {
+    try {
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('date')
+        .order('date', { ascending: false });
+        
+      if (error) {
+        console.error('Error fetching attendance dates:', error);
+        throw error;
+      }
+      
+      // Extract unique dates manually since we can't use distinct()
+      const uniqueDates = [...new Set(data.map(item => item.date))];
+      return uniqueDates;
+    } catch (error) {
+      console.error('Error in getAllAttendanceDates:', error);
+      throw error;
+    }
+  }
+
+  // Get attendance dates for a specific class
   async getAttendanceDatesByClass(classId: string): Promise<string[]> {
     try {
       const { data, error } = await supabase

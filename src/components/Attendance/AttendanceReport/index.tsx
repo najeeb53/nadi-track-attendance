@@ -15,9 +15,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { supabaseService, Student } from "@/services/SupabaseService";
-import { formatDate, getFormattedDate } from "@/utils/dateUtils";
+import { getFormattedDate } from "@/utils/dateUtils";
 import { toast } from "sonner";
-import { AttendanceTable } from './AttendanceTable';
 import { ArrowDown, ArrowUp, Download, FileText } from "lucide-react";
 
 type SortDirection = 'asc' | 'desc';
@@ -25,7 +24,6 @@ type SortField = 'trNo' | 'name' | 'division' | 'subject';
 type ViewMode = 'present' | 'absent';
 
 export function AttendanceReport() {
-  const [defaultClass, setDefaultClass] = useState<string>("");
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [viewMode, setViewMode] = useState<ViewMode>('present');
@@ -39,45 +37,24 @@ export function AttendanceReport() {
     exportAll: false
   });
   
-  // Load default class on component mount
+  // Load available dates on component mount
   useEffect(() => {
-    loadDefaultClass();
+    loadAvailableDates();
   }, []);
-  
-  // Load available dates when default class is set
-  useEffect(() => {
-    if (defaultClass) {
-      loadAvailableDates();
-    }
-  }, [defaultClass]);
   
   // Load student data when date and view mode change
   useEffect(() => {
-    if (defaultClass && selectedDate) {
+    if (selectedDate) {
       loadStudentData();
     }
-  }, [defaultClass, selectedDate, viewMode]);
-  
-  const loadDefaultClass = async () => {
-    try {
-      const loadedClasses = await supabaseService.getClasses();
-      
-      // Auto-select first class if any
-      if (loadedClasses.length > 0) {
-        setDefaultClass(loadedClasses[0].id);
-      }
-    } catch (error) {
-      console.error("Error loading default class:", error);
-      toast.error("Failed to load classes");
-    }
-  };
+  }, [selectedDate, viewMode]);
   
   const loadAvailableDates = async () => {
     try {
       setLoading(prev => ({ ...prev, dates: true }));
       
-      // Get all unique dates for which attendance was recorded for this class
-      const dates = await supabaseService.getAttendanceDatesByClass(defaultClass);
+      // Get all unique dates for which attendance was recorded for any class
+      const dates = await supabaseService.getAllAttendanceDates();
       setAvailableDates(dates);
       
       // Select the most recent date by default if available
@@ -98,21 +75,21 @@ export function AttendanceReport() {
     try {
       setLoading(prev => ({ ...prev, students: true }));
       
-      // Get all students for this class
-      const allStudents = await supabaseService.getStudentsByClass(defaultClass);
+      // Get all students
+      const allStudents = await supabaseService.getStudents();
       
-      // Get attendance records for the selected date
-      const records = await supabaseService.getAttendanceByDateAndClass(selectedDate, defaultClass);
+      // Get attendance records for the selected date (across all classes)
+      const records = await supabaseService.getAttendanceByDate(selectedDate);
       
       let filteredStudents: Student[] = [];
       
       if (viewMode === 'present') {
-        // Filter for present students
+        // Filter for present students across all classes
         filteredStudents = allStudents.filter(student => 
           records.some(record => record.studentId === student.id && record.status === 'present')
         );
       } else {
-        // Filter for absent students
+        // Filter for absent students across all classes
         filteredStudents = allStudents.filter(student => 
           records.every(record => record.studentId !== student.id || record.status !== 'present')
         );
@@ -161,7 +138,7 @@ export function AttendanceReport() {
     try {
       setLoading(prev => ({ ...prev, export: true }));
       
-      if (!selectedDate || !defaultClass) {
+      if (!selectedDate) {
         toast.error("Please select a date first");
         return;
       }
@@ -208,12 +185,12 @@ export function AttendanceReport() {
     try {
       setLoading(prev => ({ ...prev, exportAll: true }));
       
-      if (!defaultClass || availableDates.length === 0) {
+      if (availableDates.length === 0) {
         toast.error("No attendance data available");
         return;
       }
       
-      const csv = await supabaseService.exportAttendanceToCSV('', '', defaultClass, '');
+      const csv = await supabaseService.exportAttendanceToCSV('', '');
       
       // Create download
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });

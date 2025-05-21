@@ -16,7 +16,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
-import { supabaseService, Class, Student } from "@/services/SupabaseService";
+import { supabaseService, Student } from "@/services/SupabaseService";
 import { formatDate } from "@/utils/dateUtils";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -41,41 +41,17 @@ export function AttendanceForm() {
     markPresent: false
   });
 
-  // Default to first class
-  const [defaultClass, setDefaultClass] = useState<string>("");
-
-  // Load default class on component mount
+  // Load attendance data for the selected date when date is submitted
   useEffect(() => {
-    loadDefaultClass();
-  }, []);
-
-  // Load attendance data for the selected date and default class when date is submitted
-  useEffect(() => {
-    if (defaultClass && dateSubmitted) {
+    if (dateSubmitted) {
       loadAttendanceData();
       loadAllStudents();
     }
-  }, [defaultClass, selectedDate, dateSubmitted]);
-
-  const loadDefaultClass = async () => {
-    try {
-      const loadedClasses = await supabaseService.getClasses();
-      
-      // Auto-select first class if any
-      if (loadedClasses.length > 0) {
-        setDefaultClass(loadedClasses[0].id);
-      }
-    } catch (error) {
-      console.error("Error loading default class:", error);
-      toast.error("Failed to load classes");
-    }
-  };
+  }, [selectedDate, dateSubmitted]);
 
   const loadAllStudents = async () => {
     try {
-      if (!defaultClass) return;
-      
-      const students = await supabaseService.getStudentsByClass(defaultClass);
+      const students = await supabaseService.getStudents();
       setAllStudents(students);
     } catch (error) {
       console.error("Error loading students:", error);
@@ -86,15 +62,14 @@ export function AttendanceForm() {
   const loadAttendanceData = async () => {
     try {
       setLoading(prev => ({ ...prev, attendance: true }));
-      if (!defaultClass) return;
       
       const dateStr = formatDate(selectedDate);
       
-      // Get attendance records for the selected date and class
-      const records = await supabaseService.getAttendanceByDateAndClass(dateStr, defaultClass);
+      // Get attendance records for the selected date (across all classes)
+      const records = await supabaseService.getAttendanceByDate(dateStr);
       
-      // Get all students for this class with present status
-      const students = await supabaseService.getStudentsByClass(defaultClass);
+      // Get all students
+      const students = await supabaseService.getStudents();
       
       // Filter to get only students marked as present
       const studentsPresent = students.filter(student => 
@@ -120,22 +95,17 @@ export function AttendanceForm() {
   };
 
   const handleDateSubmit = async () => {
-    if (!defaultClass) {
-      toast.error("No class available");
-      return;
-    }
-    
     try {
       setLoading(prev => ({ ...prev, submit: true }));
       
       const dateStr = formatDate(selectedDate);
-      const allStudents = await supabaseService.getStudentsByClass(defaultClass);
+      const allStudents = await supabaseService.getStudents();
       
       // Mark all students as absent first by ensuring records exist
       for (const student of allStudents) {
         await supabaseService.markAttendance({
           date: dateStr,
-          classId: defaultClass,
+          classId: student.classId,
           studentId: student.id,
           status: 'absent'
         });
@@ -154,11 +124,6 @@ export function AttendanceForm() {
   const handleMarkPresent = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!defaultClass) {
-      toast.error("No class available");
-      return;
-    }
-    
     if (!dateSubmitted) {
       toast.error("Please set the date first");
       return;
@@ -172,8 +137,8 @@ export function AttendanceForm() {
     try {
       setLoading(prev => ({ ...prev, markPresent: true }));
       
-      // Find student by Tr. No.
-      const students = await supabaseService.getStudentsByClass(defaultClass);
+      // Find student by Tr. No. across all classes
+      const students = await supabaseService.getStudents();
       const student = students.find(s => s.trNo === trNumber.trim());
       
       if (!student) {
@@ -185,7 +150,7 @@ export function AttendanceForm() {
       const dateStr = formatDate(selectedDate);
       await supabaseService.markAttendance({
         date: dateStr,
-        classId: defaultClass,
+        classId: student.classId,
         studentId: student.id,
         status: 'present'
       });
@@ -247,7 +212,7 @@ export function AttendanceForm() {
               <Button 
                 type="button" 
                 onClick={handleDateSubmit}
-                disabled={loading.submit || !defaultClass}
+                disabled={loading.submit}
                 className="mb-2"
               >
                 {loading.submit ? "Setting..." : "Set Date"}
