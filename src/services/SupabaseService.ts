@@ -408,6 +408,24 @@ class SupabaseService {
     }
   }
   
+  // New method to delete all attendance records for a specific date
+  async deleteAttendanceByDate(date: string): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('attendance')
+        .delete()
+        .eq('date', date);
+      
+      if (error) {
+        console.error('Error deleting attendance records:', error);
+        throw new Error(error.message);
+      }
+    } catch (error) {
+      console.error('Error in deleteAttendanceByDate:', error);
+      throw error;
+    }
+  }
+
   // Helper function to get attendance statistics
   async getAttendanceStats(classId: string, startDate: string, endDate: string): Promise<{ 
     totalDays: number;

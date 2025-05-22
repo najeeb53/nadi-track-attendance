@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon, Check, X, RefreshCw } from "lucide-react";
+import { CalendarIcon, Check, X, RefreshCw, Trash2 } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -14,6 +14,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { supabaseService, Student } from "@/services/SupabaseService";
 import { formatDate } from "@/utils/dateUtils";
@@ -36,11 +46,14 @@ export function AttendanceForm() {
   const [presentStudents, setPresentStudents] = useState<Student[]>([]);
   const [allStudents, setAllStudents] = useState<Student[]>([]);
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
   const [loading, setLoading] = useState({
     submit: false,
     attendance: false,
     markPresent: false,
-    toggleStatus: false
+    toggleStatus: false,
+    deleteDate: false,
+    markAllPresent: false
   });
 
   // Load attendance data for the selected date when date is submitted
@@ -242,6 +255,70 @@ export function AttendanceForm() {
     });
   };
 
+  // New function to delete all attendance records for the selected date
+  const handleDeleteDate = async () => {
+    if (!dateSubmitted) {
+      toast.error("Please set the date first");
+      return;
+    }
+    
+    try {
+      setLoading(prev => ({ ...prev, deleteDate: true }));
+      
+      const dateStr = formatDate(selectedDate);
+      
+      // Delete all attendance records for the selected date (across all classes)
+      await supabaseService.deleteAttendanceByDate(dateStr);
+      
+      // Reset states
+      setDateSubmitted(false);
+      setPresentStudents([]);
+      setIsEditMode(false);
+      
+      toast.success(`Attendance records for ${format(selectedDate, "PPP")} have been deleted`);
+    } catch (error) {
+      console.error("Error deleting attendance records:", error);
+      toast.error("Failed to delete attendance records");
+    } finally {
+      setLoading(prev => ({ ...prev, deleteDate: false }));
+      setDeleteDialogOpen(false);
+    }
+  };
+
+  // New function to mark all students as present for the selected date
+  const handleMarkAllPresent = async () => {
+    if (!dateSubmitted) {
+      toast.error("Please set the date first");
+      return;
+    }
+    
+    try {
+      setLoading(prev => ({ ...prev, markAllPresent: true }));
+      
+      const dateStr = formatDate(selectedDate);
+      
+      // Mark all students as present
+      for (const student of allStudents) {
+        await supabaseService.markAttendance({
+          date: dateStr,
+          classId: student.classId,
+          studentId: student.id,
+          status: 'present'
+        });
+      }
+      
+      // Reload attendance data
+      await loadAttendanceData();
+      
+      toast.success(`All students marked present for ${format(selectedDate, "PPP")}`);
+    } catch (error) {
+      console.error("Error marking all students as present:", error);
+      toast.error("Failed to mark all students as present");
+    } finally {
+      setLoading(prev => ({ ...prev, markAllPresent: false }));
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -328,12 +405,49 @@ export function AttendanceForm() {
                 Students Present on {format(selectedDate, "PPP")}
               </h3>
               
-              {isEditMode && (
-                <div className="text-sm text-muted-foreground">
-                  Toggle switches to update attendance status
-                </div>
-              )}
+              <div className="flex space-x-2">
+                <Button
+                  type="button"
+                  onClick={handleMarkAllPresent}
+                  disabled={loading.markAllPresent}
+                  variant="default"
+                >
+                  {loading.markAllPresent ? "Processing..." : "Mark All Present"}
+                </Button>
+                
+                <Button
+                  type="button"
+                  onClick={() => setDeleteDialogOpen(true)}
+                  disabled={loading.deleteDate}
+                  variant="destructive"
+                >
+                  <Trash2 className="mr-1 h-4 w-4" />
+                  Delete Date
+                </Button>
+              </div>
             </div>
+            
+            <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete Attendance Records</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Are you sure you want to delete all attendance records for {format(selectedDate, "PPP")}?
+                    This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction 
+                    onClick={handleDeleteDate}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    disabled={loading.deleteDate}
+                  >
+                    {loading.deleteDate ? "Deleting..." : "Delete"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
             
             {loading.attendance ? (
               <div className="text-center py-6">
