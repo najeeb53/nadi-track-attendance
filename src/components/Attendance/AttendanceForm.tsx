@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon, Check, X } from "lucide-react";
+import { CalendarIcon, Check, X, RefreshCw } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -28,6 +28,7 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
 
 export function AttendanceForm() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -35,10 +36,12 @@ export function AttendanceForm() {
   const [trNumber, setTrNumber] = useState<string>("");
   const [presentStudents, setPresentStudents] = useState<Student[]>([]);
   const [allStudents, setAllStudents] = useState<Student[]>([]);
+  const [isEditMode, setIsEditMode] = useState<boolean>(false);
   const [loading, setLoading] = useState({
     submit: false,
     attendance: false,
-    markPresent: false
+    markPresent: false,
+    toggleStatus: false
   });
 
   // Load attendance data for the selected date when date is submitted
@@ -91,6 +94,17 @@ export function AttendanceForm() {
       setDateSubmitted(false); // Reset submission state when date changes
       setTrNumber(""); // Clear TR number input
       setPresentStudents([]); // Clear present students list
+      setIsEditMode(false); // Reset edit mode
+    }
+  };
+
+  const checkAttendanceExists = async (dateStr: string) => {
+    try {
+      const records = await supabaseService.getAttendanceByDate(dateStr);
+      return records.length > 0;
+    } catch (error) {
+      console.error("Error checking attendance:", error);
+      return false;
     }
   };
 
@@ -99,23 +113,36 @@ export function AttendanceForm() {
       setLoading(prev => ({ ...prev, submit: true }));
       
       const dateStr = formatDate(selectedDate);
-      const allStudents = await supabaseService.getStudents();
       
-      // Mark all students as absent first by ensuring records exist
-      for (const student of allStudents) {
-        await supabaseService.markAttendance({
-          date: dateStr,
-          classId: student.classId,
-          studentId: student.id,
-          status: 'absent'
-        });
+      // Check if attendance records already exist for this date
+      const attendanceExists = await checkAttendanceExists(dateStr);
+      
+      if (attendanceExists) {
+        // If records exist, just load them without resetting
+        setDateSubmitted(true);
+        setIsEditMode(true);
+        toast.success(`Attendance for ${format(selectedDate, "PPP")} loaded for editing`);
+      } else {
+        // If no records exist, initialize all students as absent
+        const allStudents = await supabaseService.getStudents();
+        
+        // Mark all students as absent first by ensuring records exist
+        for (const student of allStudents) {
+          await supabaseService.markAttendance({
+            date: dateStr,
+            classId: student.classId,
+            studentId: student.id,
+            status: 'absent'
+          });
+        }
+        
+        setDateSubmitted(true);
+        setIsEditMode(false);
+        toast.success(`New attendance sheet initialized for ${format(selectedDate, "PPP")}`);
       }
-      
-      setDateSubmitted(true);
-      toast.success(`Attendance sheet initialized for ${format(selectedDate, "PPP")}`);
     } catch (error) {
-      console.error("Error initializing attendance:", error);
-      toast.error("Failed to initialize attendance");
+      console.error("Error setting up attendance:", error);
+      toast.error("Failed to set up attendance");
     } finally {
       setLoading(prev => ({ ...prev, submit: false }));
     }
@@ -170,6 +197,37 @@ export function AttendanceForm() {
     }
   };
 
+  const handleToggleAttendance = async (student: Student) => {
+    try {
+      setLoading(prev => ({ ...prev, toggleStatus: true }));
+      
+      const dateStr = formatDate(selectedDate);
+      const isPresent = presentStudents.some(s => s.id === student.id);
+      
+      // Toggle student's status
+      await supabaseService.markAttendance({
+        date: dateStr,
+        classId: student.classId,
+        studentId: student.id,
+        status: isPresent ? 'absent' : 'present'
+      });
+      
+      // Reload attendance data
+      await loadAttendanceData();
+      
+      toast.success(`${student.name}'s attendance updated to ${isPresent ? 'absent' : 'present'}`);
+    } catch (error) {
+      console.error("Error toggling attendance:", error);
+      toast.error("Failed to update attendance");
+    } finally {
+      setLoading(prev => ({ ...prev, toggleStatus: false }));
+    }
+  };
+
+  const isStudentPresent = (student: Student) => {
+    return presentStudents.some(s => s.id === student.id);
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -208,14 +266,15 @@ export function AttendanceForm() {
             </div>
             
             {/* Submit Button */}
-            <div className="flex items-end">
+            <div className="flex items-end space-x-2">
               <Button 
                 type="button" 
                 onClick={handleDateSubmit}
                 disabled={loading.submit}
                 className="mb-2"
               >
-                {loading.submit ? "Setting..." : "Set Date"}
+                {loading.submit ? "Setting..." : dateSubmitted ? "Refresh Data" : "Set Date"}
+                {dateSubmitted && <RefreshCw className="ml-1 h-4 w-4" />}
               </Button>
             </div>
           </div>
@@ -250,15 +309,23 @@ export function AttendanceForm() {
         {/* Display present students - Only shown after date is submitted */}
         {dateSubmitted && (
           <div className="mt-8">
-            <h3 className="text-lg font-medium mb-4">
-              Students Present on {format(selectedDate, "PPP")}
-            </h3>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium">
+                Students Present on {format(selectedDate, "PPP")}
+              </h3>
+              
+              {isEditMode && (
+                <div className="text-sm text-muted-foreground">
+                  Toggle switches to update attendance status
+                </div>
+              )}
+            </div>
             
             {loading.attendance ? (
               <div className="text-center py-6">
                 <p>Loading data...</p>
               </div>
-            ) : presentStudents.length > 0 ? (
+            ) : allStudents.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -266,10 +333,11 @@ export function AttendanceForm() {
                     <TableHead>Name</TableHead>
                     <TableHead>Division</TableHead>
                     <TableHead>Subject</TableHead>
+                    <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {presentStudents.map((student) => (
+                  {allStudents.map((student) => (
                     <TableRow key={student.id}>
                       <TableCell>{student.trNo}</TableCell>
                       <TableCell>
@@ -286,13 +354,23 @@ export function AttendanceForm() {
                       </TableCell>
                       <TableCell>{student.division || "-"}</TableCell>
                       <TableCell>{student.subject || "-"}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={isStudentPresent(student)}
+                            onCheckedChange={() => handleToggleAttendance(student)}
+                            disabled={loading.toggleStatus}
+                          />
+                          <span>{isStudentPresent(student) ? "Present" : "Absent"}</span>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             ) : (
               <div className="text-center py-6 border rounded-md bg-gray-50">
-                <p className="text-muted-foreground">No students marked present yet</p>
+                <p className="text-muted-foreground">No students found</p>
               </div>
             )}
           </div>

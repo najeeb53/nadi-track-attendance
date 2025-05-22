@@ -6,6 +6,8 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 interface ExtendedStudent extends Student {
   presentDays?: number;
   totalDays?: number;
+  absentDays?: number;
+  attendancePercentage?: number;
 }
 
 type SortDirection = 'asc' | 'desc';
@@ -17,6 +19,7 @@ interface AttendanceTableProps {
   sortField: SortField;
   sortDirection: SortDirection;
   onSort: (field: SortField) => void;
+  showAttendanceColumns?: boolean;
 }
 
 export function AttendanceTable({ 
@@ -24,7 +27,8 @@ export function AttendanceTable({
   loading,
   sortField,
   sortDirection,
-  onSort
+  onSort,
+  showAttendanceColumns = false
 }: AttendanceTableProps) {
   
   const getSortIcon = (field: SortField) => {
@@ -60,6 +64,20 @@ export function AttendanceTable({
                 <th onClick={() => onSort('subject')} className="cursor-pointer">
                   Subject {getSortIcon('subject')}
                 </th>
+                
+                {showAttendanceColumns && (
+                  <>
+                    <th onClick={() => onSort('presentDays')} className="cursor-pointer">
+                      Present {getSortIcon('presentDays')}
+                    </th>
+                    <th onClick={() => onSort('absentDays')} className="cursor-pointer">
+                      Absent {getSortIcon('absentDays')}
+                    </th>
+                    <th onClick={() => onSort('totalDays')} className="cursor-pointer">
+                      Total {getSortIcon('totalDays')}
+                    </th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -80,6 +98,14 @@ export function AttendanceTable({
                   </td>
                   <td>{student.division || "-"}</td>
                   <td>{student.subject || "-"}</td>
+                  
+                  {showAttendanceColumns && (
+                    <>
+                      <td>{student.presentDays || 0}</td>
+                      <td>{student.absentDays || 0}</td>
+                      <td>{student.totalDays || 0}</td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
