@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -228,6 +227,21 @@ export function AttendanceForm() {
     return presentStudents.some(s => s.id === student.id);
   };
 
+  // New function to sort students by attendance status
+  const getSortedStudents = () => {
+    return [...allStudents].sort((a, b) => {
+      const aPresent = isStudentPresent(a);
+      const bPresent = isStudentPresent(b);
+      
+      // Present students come first
+      if (aPresent && !bPresent) return -1;
+      if (!aPresent && bPresent) return 1;
+      
+      // If both have same status, sort by name
+      return a.name.localeCompare(b.name);
+    });
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -337,8 +351,8 @@ export function AttendanceForm() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {allStudents.map((student) => (
-                    <TableRow key={student.id}>
+                  {getSortedStudents().map((student) => (
+                    <TableRow key={student.id} className={isStudentPresent(student) ? "bg-green-50" : ""}>
                       <TableCell>{student.trNo}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
