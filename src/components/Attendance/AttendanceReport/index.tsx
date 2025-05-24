@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import {
@@ -180,6 +179,14 @@ export function AttendanceReport() {
   
   const getSortedStudents = (): ExtendedStudent[] => {
     return [...students].sort((a, b) => {
+      // For summary view, always sort by attendance percentage in ascending order
+      if (viewMode === 'summary') {
+        const aPercentage = a.attendancePercentage || 0;
+        const bPercentage = b.attendancePercentage || 0;
+        return aPercentage - bPercentage; // ascending order (least to max)
+      }
+      
+      // For other views, use existing sort logic
       const aValue = a[sortField as keyof ExtendedStudent];
       const bValue = b[sortField as keyof ExtendedStudent];
       
@@ -340,30 +347,14 @@ export function AttendanceReport() {
         <table className="nadi-table w-full">
           <thead>
             <tr>
-              <th onClick={() => toggleSort('trNo')} className="cursor-pointer">
-                Tr. No. {getSortIcon('trNo')}
-              </th>
-              <th onClick={() => toggleSort('name')} className="cursor-pointer">
-                Name {getSortIcon('name')}
-              </th>
-              <th onClick={() => toggleSort('division')} className="cursor-pointer">
-                Division {getSortIcon('division')}
-              </th>
-              <th onClick={() => toggleSort('subject')} className="cursor-pointer">
-                Subject {getSortIcon('subject')}
-              </th>
-              <th onClick={() => toggleSort('presentDays')} className="cursor-pointer">
-                Present Days {getSortIcon('presentDays')}
-              </th>
-              <th onClick={() => toggleSort('totalDays')} className="cursor-pointer">
-                Absent Days {getSortIcon('totalDays')}
-              </th>
-              <th onClick={() => toggleSort('totalDays')} className="cursor-pointer">
-                Total Days {getSortIcon('totalDays')}
-              </th>
-              <th onClick={() => toggleSort('totalDays')} className="cursor-pointer">
-                Attendance % {getSortIcon('totalDays')}
-              </th>
+              <th>Tr. No.</th>
+              <th>Name</th>
+              <th>Division</th>
+              <th>Subject</th>
+              <th>Present Days</th>
+              <th>Absent Days</th>
+              <th>Total Days</th>
+              <th>Attendance % (Least to Max)</th>
             </tr>
           </thead>
           <tbody>
