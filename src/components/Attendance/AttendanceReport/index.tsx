@@ -354,7 +354,7 @@ export function AttendanceReport() {
               <th>Present Days</th>
               <th>Absent Days</th>
               <th>Total Days</th>
-              <th>Attendance % (Least to Max)</th>
+              <th>Attendance %</th>
             </tr>
           </thead>
           <tbody>
